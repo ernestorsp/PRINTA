@@ -1,7 +1,7 @@
 const SPREADSHEET_ID='1eOWiWZh0zTnVLnv53bTDXvlFJJG5ZbvR6Upr7_9uLb8';
 const ORDERS_SHEET='ORDENES',EXPENSES_SHEET='GASTOS',PRODUCTS_SHEET='PRODUCTOS',CONFIG_SHEET='CONFIGURACION',INVENTORY_SHEET='INVENTARIO';
 const LOGO_FILE_ID='1KNCCBhFm4vD92Jpi5rdKKgC6xxEWk1ea';
-const APP_CACHE_KEY='PRINTA_APP_DATA_V11';
+const APP_CACHE_KEY='PRINTA_APP_DATA_V12';
 const ORDER_HEADERS=['ID','FECHA','ESTADO','ORIGEN','CLIENTE','PRODUCTO','CANTIDAD','NOTAS','PAGADO','FECHA_ENVIO','FOTO','CREADO_EN','ACTUALIZADO_EN','COSTO_TOTAL','GANANCIA','INVENTARIO_DESCONTADO','MATERIALES_JSON','OTROS_COSTOS_JSON'];
 const EXPENSE_HEADERS=['ID','FECHA','CATEGORIA','LUGAR','CANTIDAD','NOTA','RECIBO','CREADO_EN'];
 const PRODUCT_HEADERS=['ID','NOMBRE','FOTO','DISPONIBLE','CREADO_EN','ACTUALIZADO_EN'];
@@ -56,8 +56,8 @@ function calculateShippingDate(d,o){const ss=SpreadsheetApp.openById(SPREADSHEET
 function saveInventoryItem(x){if(!x||!clean_(x.nombre)||number_(x.cantidad,0)<=0)throw new Error('Completa nombre y cantidad.');const lock=LockService.getScriptLock();lock.waitLock(30000);try{ensureSchema_();const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(INVENTORY_SHEET),now=new Date(),id=nextId_('INV'),q=number_(x.cantidad,0),t=money_(x.costoTotal),u=q>0?t/q:0;sh.appendRow([id,clean_(x.nombre),clean_(x.categoria)||'Material',q,t,u,clean_(x.nota),now,now]);invalidateCache_()}finally{lock.releaseLock()}return getAppData()}
 function deleteInventoryItem(id){const lock=LockService.getScriptLock();lock.waitLock(30000);try{const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(INVENTORY_SHEET),used=readRows_(ss.getSheetByName(ORDERS_SHEET)).some(o=>parseJson_(o.materialesJson,[]).some(m=>m.id===id));if(used)throw new Error('Este artículo ya está usado en órdenes. Déjalo en cantidad 0 en vez de borrarlo.');const m=findRowsById_(sh,id);if(m.length===1)sh.deleteRow(m[0]);invalidateCache_()}finally{lock.releaseLock()}return getAppData()}
 
-function saveOrder(o){if(!o||!clean_(o.cliente)||!clean_(o.producto))throw new Error('Completa cliente y producto.');const mode=clean_(o._mode),lock=LockService.getScriptLock();lock.waitLock(30000);try{ensureSchema_();const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(ORDERS_SHEET),now=new Date(),fecha=o.fecha||formatDate_(now),envio=addBusinessDays_(parseDate_(fecha)||now,getHandlingDays_(o.origen,getSettings_(ss)));let id,row=0,created=now,old={};if(mode==='create'){const key=clean_(o.clientKey);id='PC-'+key;if(findRowsById_(sh,id).length===1)return getAppData()}else{id=clean_(o.id);const m=findRowsById_(sh,id);if(m.length!==1)throw new Error('Orden no encontrada.');row=m[0];old=rowObject_(sh,row);created=sh.getRange(row,12).getValue()||now}const mats=parseJson_(o.materialesJson,[]),others=parseJson_(o.otrosCostosJson,[]),cost=calculateCosts_(ss,mats,others,money_(o.pagado)),was=String(old.inventarioDescontado).toLowerCase()==='true';if(was){adjustInventory_(ss,parseJson_(old.materialesJson,[]),1);adjustInventory_(ss,mats,-1)}const values=[id,fecha,o.estado||old.estado||'Pendiente',o.origen||'Otro',clean_(o.cliente),clean_(o.producto),number_(o.cantidad,1),clean_(o.notas),money_(o.pagado),envio,clean_(o.foto),created,now,cost.total,cost.gain,was,JSON.stringify(mats),JSON.stringify(others)];row?sh.getRange(row,1,1,values.length).setValues([values]):sh.appendRow(values);invalidateCache_()}finally{lock.releaseLock()}return getAppData()}
-function setOrderStatus(id,status){const lock=LockService.getScriptLock();lock.waitLock(30000);try{const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(ORDERS_SHEET),m=findRowsById_(sh,id);if(m.length!==1)throw new Error('Orden no encontrada.');const r=m[0],o=rowObject_(sh,r),used=String(o.inventarioDescontado).toLowerCase()==='true',mats=parseJson_(o.materialesJson,[]);if(status==='Listo'&&!used){adjustInventory_(ss,mats,-1);sh.getRange(r,16).setValue(true)}if(status==='Pendiente'&&used){adjustInventory_(ss,mats,1);sh.getRange(r,16).setValue(false)}sh.getRange(r,3).setValue(status);sh.getRange(r,13).setValue(new Date());invalidateCache_()}finally{lock.releaseLock()}return getAppData()}
+function saveOrder(o){if(!o||!clean_(o.cliente)||!clean_(o.producto))throw new Error('Completa cliente y producto.');const mode=clean_(o._mode),lock=LockService.getScriptLock();lock.waitLock(30000);try{ensureSchema_();const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(ORDERS_SHEET),now=new Date(),fecha=o.fecha||formatDate_(now),envio=addBusinessDays_(parseDate_(fecha)||now,getHandlingDays_(o.origen,getSettings_(ss)));let id,row=0,created=now,old={};if(mode==='create'){const key=clean_(o.clientKey);id='PC-'+key;if(findRowsById_(sh,id).length===1)return getAppData()}else{id=clean_(o.id);const m=findRowsById_(sh,id);if(m.length!==1)throw new Error('Orden no encontrada.');row=m[0];old=rowObject_(sh,row);created=sh.getRange(row,12).getValue()||now}const mats=parseJson_(o.materialesJson,[]),others=parseJson_(o.otrosCostosJson,[]);let cost=calculateCosts_(ss,mats,others,money_(o.pagado)),was=String(old.inventarioDescontado).toLowerCase()==='true';if(was){adjustInventory_(ss,parseJson_(old.materialesJson,[]),1);adjustInventory_(ss,mats,-1);cost=calculateCosts_(ss,mats,others,money_(o.pagado))}const values=[id,fecha,o.estado||old.estado||'Pendiente',o.origen||'Otro',clean_(o.cliente),clean_(o.producto),number_(o.cantidad,1),clean_(o.notas),money_(o.pagado),envio,clean_(o.foto),created,now,cost.total,cost.gain,was,JSON.stringify(mats),JSON.stringify(others)];row?sh.getRange(row,1,1,values.length).setValues([values]):sh.appendRow(values);invalidateCache_()}finally{lock.releaseLock()}return getAppData()}
+function setOrderStatus(id,status){const lock=LockService.getScriptLock();lock.waitLock(30000);try{const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(ORDERS_SHEET),m=findRowsById_(sh,id);if(m.length!==1)throw new Error('Orden no encontrada.');const r=m[0],o=rowObject_(sh,r),used=String(o.inventarioDescontado).toLowerCase()==='true',mats=parseJson_(o.materialesJson,[]);if(status==='Listo'&&!used){adjustInventory_(ss,mats,-1);sh.getRange(r,16).setValue(true);sh.getRange(r,17).setValue(JSON.stringify(mats));const cost=calculateCosts_(ss,mats,parseJson_(o.otrosCostosJson,[]),money_(o.pagado));sh.getRange(r,14,1,2).setValues([[cost.total,cost.gain]])}if(status==='Pendiente'&&used){adjustInventory_(ss,mats,1);sh.getRange(r,16).setValue(false)}sh.getRange(r,3).setValue(status);sh.getRange(r,13).setValue(new Date());invalidateCache_()}finally{lock.releaseLock()}return getAppData()}
 function deleteOrder(id){const lock=LockService.getScriptLock();lock.waitLock(30000);try{const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(ORDERS_SHEET),m=findRowsById_(sh,id);if(m.length!==1)throw new Error('Orden no encontrada.');const o=rowObject_(sh,m[0]);if(String(o.inventarioDescontado).toLowerCase()==='true')adjustInventory_(ss,parseJson_(o.materialesJson,[]),1);sh.deleteRow(m[0]);invalidateCache_()}finally{lock.releaseLock()}return getAppData()}
 
 function saveExpense(e){if(!e||money_(e.cantidad)<=0)throw new Error('Escribe una cantidad válida.');const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(EXPENSES_SHEET),now=new Date(),id=e.id||nextId_('GA');upsertById_(sh,id,[id,e.fecha||formatDate_(now),e.categoria||'Otro',clean_(e.lugar),money_(e.cantidad),clean_(e.nota),clean_(e.recibo),e.creadoEn||now]);invalidateCache_();return getAppData()}
@@ -69,8 +69,44 @@ function getUploadsFolder_(){const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh
 
 function ensureSchema_(){const ss=SpreadsheetApp.openById(SPREADSHEET_ID);ensureSheet_(ss,ORDERS_SHEET,ORDER_HEADERS);ensureSheet_(ss,EXPENSES_SHEET,EXPENSE_HEADERS);ensureSheet_(ss,PRODUCTS_SHEET,PRODUCT_HEADERS);ensureSheet_(ss,CONFIG_SHEET,['CLAVE','VALOR']);ensureSheet_(ss,INVENTORY_SHEET,INVENTORY_HEADERS)}
 function ensureSheet_(ss,n,h){let sh=ss.getSheetByName(n);if(!sh)sh=ss.insertSheet(n);if(sh.getLastRow()===0)sh.appendRow(h);else{const cur=sh.getRange(1,1,1,Math.max(sh.getLastColumn(),1)).getDisplayValues()[0];h.forEach(x=>{if(!cur.includes(x)){sh.getRange(1,sh.getLastColumn()+1).setValue(x);cur.push(x)}})}return sh}
-function calculateCosts_(ss,mats,others,paid){const inv=readRows_(ss.getSheetByName(INVENTORY_SHEET)),map={};inv.forEach(x=>map[x.id]=x);let total=0;mats.forEach(m=>{if(map[m.id])total+=money_(map[m.id].costoUnitario)*number_(m.cantidad,0)});total+=others.reduce((s,x)=>s+money_(x.costo),0);return{total,gain:paid-total}}
-function adjustInventory_(ss,mats,dir){const sh=ss.getSheetByName(INVENTORY_SHEET),map={};readRows_(sh).forEach(x=>map[x.id]=x);mats.forEach(m=>{const x=map[m.id];if(!x)throw new Error('Material no encontrado.');const rows=findRowsById_(sh,m.id),q=number_(m.cantidad,0),current=number_(x.cantidad,0),next=current+dir*q;if(next<0)throw new Error('Inventario insuficiente de '+x.nombre+'. Disponible: '+current);sh.getRange(rows[0],4).setValue(next);sh.getRange(rows[0],5).setValue(next*money_(x.costoUnitario));sh.getRange(rows[0],9).setValue(new Date())})}
+function inventoryBatchRows_(sh,refId){
+  const values=sh.getRange(1,1,Math.max(sh.getLastRow(),1),sh.getLastColumn()).getDisplayValues(),headers=values.shift();
+  const rows=values.map((r,i)=>{const o={_row:i+2};headers.forEach((h,j)=>o[toKey_(h)]=r[j]);return o}).filter(x=>x.id);
+  const source=rows.find(x=>clean_(x.id)===clean_(refId));
+  if(!source)return[];
+  const name=clean_(source.nombre).toLowerCase(),cat=clean_(source.categoria).toLowerCase();
+  return rows.filter(x=>clean_(x.nombre).toLowerCase()===name&&clean_(x.categoria).toLowerCase()===cat).sort((a,b)=>a._row-b._row)
+}
+function fifoCost_(sh,m){
+  let need=number_(m.cantidad,0),total=0;
+  if(Array.isArray(m.lotes)&&m.lotes.length){
+    m.lotes.forEach(l=>{const r=findRowsById_(sh,l.id);if(r.length===1){const x=rowObject_(sh,r[0]);total+=number_(l.cantidad,0)*money_(x.costoUnitario)}});
+    return total
+  }
+  const batches=inventoryBatchRows_(sh,m.id);
+  batches.forEach(x=>{if(need<=0)return;const take=Math.min(need,number_(x.cantidad,0));total+=take*money_(x.costoUnitario);need-=take});
+  if(need>0&&batches.length)total+=need*money_(batches[0].costoUnitario);
+  return total
+}
+function calculateCosts_(ss,mats,others,paid){const sh=ss.getSheetByName(INVENTORY_SHEET);let total=0;mats.forEach(m=>total+=fifoCost_(sh,m));total+=others.reduce((s,x)=>s+money_(x.costo),0);return{total,gain:paid-total}}
+function adjustInventory_(ss,mats,dir){
+  const sh=ss.getSheetByName(INVENTORY_SHEET);
+  mats.forEach(m=>{
+    const qty=number_(m.cantidad,0);if(qty<=0)return;
+    if(dir>0){
+      const lots=Array.isArray(m.lotes)&&m.lotes.length?m.lotes:[{id:m.id,cantidad:qty}];
+      lots.forEach(l=>{const rows=findRowsById_(sh,l.id);if(rows.length!==1)return;const x=rowObject_(sh,rows[0]),next=number_(x.cantidad,0)+number_(l.cantidad,0);sh.getRange(rows[0],4).setValue(next);sh.getRange(rows[0],5).setValue(next*money_(x.costoUnitario));sh.getRange(rows[0],9).setValue(new Date())});
+      return
+    }
+    let need=qty;const lots=[];
+    const batches=inventoryBatchRows_(sh,m.id);
+    const available=batches.reduce((s,x)=>s+number_(x.cantidad,0),0);
+    if(available<need)throw new Error('Inventario insuficiente de '+(batches[0]?batches[0].nombre:'este artículo')+'. Disponible total: '+available);
+    batches.forEach(x=>{if(need<=0)return;const current=number_(x.cantidad,0),take=Math.min(current,need);if(take<=0)return;const next=current-take;sh.getRange(x._row,4).setValue(next);sh.getRange(x._row,5).setValue(next*money_(x.costoUnitario));sh.getRange(x._row,9).setValue(new Date());lots.push({id:x.id,cantidad:take,costoUnitario:money_(x.costoUnitario)});need-=take});
+    m.lotes=lots
+  });
+  return mats
+}
 function getSettings_(ss){const sh=ss.getSheetByName(CONFIG_SHEET),rows=sh.getRange(1,1,Math.max(sh.getLastRow(),1),2).getValues(),o={tiktokDays:2,printaDays:3};rows.forEach(r=>{if(r[0]==='TIKTOK_DIAS_ENVIO')o.tiktokDays=number_(r[1],2);if(r[0]==='PRINTA_DIAS_ENVIO')o.printaDays=number_(r[1],3)});return o}
 function getHandlingDays_(o,s){return o==='TikTok'?s.tiktokDays:s.printaDays}function addBusinessDays_(d,n){const x=new Date(d);let a=0;while(a<n){x.setDate(x.getDate()+1);if(x.getDay()!==0&&x.getDay()!==6)a++}return formatDate_(x)}function parseDate_(v){if(!v)return null;const p=String(v).split('-').map(Number);return p.length===3?new Date(p[0],p[1]-1,p[2],12):new Date(v)}
 function readRows_(sh){if(!sh||sh.getLastRow()<2)return[];const v=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getDisplayValues(),h=v.shift();return v.filter(r=>r[0]).map(r=>{const o={};h.forEach((x,i)=>o[toKey_(x)]=r[i]);return o})}function rowObject_(sh,r){const h=sh.getRange(1,1,1,sh.getLastColumn()).getDisplayValues()[0],v=sh.getRange(r,1,1,sh.getLastColumn()).getDisplayValues()[0],o={};h.forEach((x,i)=>o[toKey_(x)]=v[i]);return o}
