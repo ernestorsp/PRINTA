@@ -1,0 +1,49 @@
+name: Aplicar acordeón de costos
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-ui-accordion.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Actualizar App.html
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('App.html')
+          s = p.read_text(encoding='utf-8')
+
+          css_anchor = '.auto-cost-note{padding:9px 11px;border-radius:11px;background:#eef8f1;color:#166534;font-size:13px;font-weight:800;margin-bottom:10px}'
+          css_extra = '''.auto-cost-note{padding:10px 13px;border-radius:13px;background:#eef8f1;color:#166534;font-size:13px;font-weight:800;margin-bottom:12px}.cost-summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 12px}.cost-summary-card{padding:12px 14px;border-radius:14px;background:#fff;border:1px solid var(--line)}.cost-summary-card small{display:block;color:var(--muted);font-weight:800;margin-bottom:4px}.cost-summary-card strong{font-size:19px}.cost-accordion{border:1px solid var(--line);border-radius:14px;background:#fff;margin-top:9px;overflow:hidden}.cost-accordion summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 15px;font-weight:900;cursor:pointer}.cost-accordion summary::-webkit-details-marker{display:none}.cost-accordion summary:after{content:'⌄';font-size:22px;color:var(--purple);transition:transform .2s}.cost-accordion[open] summary:after{transform:rotate(180deg)}.cost-accordion-body{padding:0 14px 14px;border-top:1px solid var(--line)}.accordion-action{display:flex;justify-content:flex-end;margin:12px 0 4px}.ink-preview{font-size:12px;color:var(--muted);font-weight:800}.cost-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;padding:14px;border-radius:14px;background:#f5f7ff;border:1px solid #e5e7ff}.cost-footer span{font-size:13px;color:var(--muted);font-weight:800}.cost-footer strong{font-size:21px}@media(max-width:560px){.cost-summary{grid-template-columns:1fr 1fr}.cost-accordion summary{padding:13px}.cost-footer{padding:12px}}'''
+          if css_anchor in s:
+              s = s.replace(css_anchor, css_extra, 1)
+
+          pattern = re.compile(r'<div class="full inventory-box"><div id="automaticProductNote".*?<div class="costline"><span>Costo total: <b id="orderCostPreview">\$0\.00</b></span><span id="orderProfitPreview" class="gain">\+\$0\.00</span></div></div>', re.S)
+          replacement = '''<div class="full inventory-box"><div id="automaticProductNote" class="auto-cost-note"></div><div class="cost-summary"><div class="cost-summary-card"><small>Costo estimado</small><strong id="orderCostPreview">$0.00</strong></div><div class="cost-summary-card"><small>Ganancia estimada</small><strong id="orderProfitPreview" class="gain">+$0.00</strong></div></div><details class="cost-accordion"><summary><span>📦 Materiales adicionales</span><span class="ink-preview">Agregar embalaje, hoja, caja…</span></summary><div class="cost-accordion-body"><div class="accordion-action"><button type="button" class="btn light" onclick="addMaterialRow()">+ Material</button></div><div id="materialRows"></div></div></details><details class="cost-accordion"><summary><span>🎨 Tinta</span><span id="inkSummary" class="ink-preview">Sin tinta · $0.00</span></summary><div class="cost-accordion-body"><div class="ink-row"><div><label>Tipo de tinta</label><select id="inkType" onchange="inkType=this.value;recalculateOrder()"><option>Sin tinta</option><option>Sawgrass</option><option>Eufy</option></select></div><div><label>Costo usado en esta orden</label><input id="inkCost" type="number" min="0" step="0.01" value="0" oninput="inkCost=num(this.value);recalculateOrder()"></div></div></div></details><details class="cost-accordion"><summary><span>➕ Otros costos</span><span class="ink-preview">Diseño, entrega u otros</span></summary><div class="cost-accordion-body"><div class="accordion-action"><button type="button" class="btn light" onclick="addOtherCostRow()">+ Otro costo</button></div><div id="otherCostRows"></div></div></details><div class="cost-footer"><span>Resultado estimado de esta orden</span><strong id="orderProfitFooter" class="gain">+$0.00</strong></div></div>'''
+          s2, n = pattern.subn(replacement, s, count=1)
+          if n != 1:
+              raise SystemExit('No se encontró el bloque de costos para reemplazar')
+          s = s2
+
+          old = "$('#orderProfitPreview').textContent=(g>=0?'+':'')+money(g);$('#orderProfitPreview').className=g>=0?'gain':'loss'"
+          new = "$('#orderProfitPreview').textContent=(g>=0?'+':'')+money(g);$('#orderProfitPreview').className=g>=0?'gain':'loss';const footer=$('#orderProfitFooter');if(footer){footer.textContent=(g>=0?'+':'')+money(g);footer.className=g>=0?'gain':'loss'}const inkSummary=$('#inkSummary');if(inkSummary)inkSummary.textContent=(inkType||'Sin tinta')+' · '+money(inkCost)"
+          if old not in s:
+              raise SystemExit('No se encontró el cálculo de ganancia')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Confirmar cambios
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add App.html
+          git rm .github/workflows/temp-ui-accordion.yml
+          git commit -m "Mejorar formulario de orden con acordeones"
+          git push
