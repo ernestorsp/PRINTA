@@ -1,0 +1,47 @@
+name: Simplificar costos de orden
+
+on:
+  push:
+    paths:
+      - '.github/workflows/simplify-order-costs.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  simplify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Simplificar interfaz de costos
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('App.html')
+          text = path.read_text(encoding='utf-8')
+
+          start = '<div class="full inventory-box"><div id="automaticProductNote"'
+          end = '<div class="full actions"><button class="btn primary" id="saveOrderBtn">'
+          a = text.find(start)
+          b = text.find(end, a)
+          if a < 0 or b < 0:
+              raise SystemExit('No se encontró la sección de costos')
+
+          simple = '''<div class="full inventory-box simple-cost-box"><div class="simple-cost-head"><div><h3>Costos de la orden</h3><div id="automaticProductNote" class="auto-cost-note"></div></div><div class="simple-profit"><small>Ganancia</small><strong id="orderProfitPreview" class="gain">+$0.00</strong></div></div><div class="ink-row simple-ink"><div><label>Tinta</label><select id="inkType" onchange="inkType=this.value;recalculateOrder()"><option>Sin tinta</option><option>Sawgrass</option><option>Eufy</option></select></div><div><label>Costo de tinta</label><input id="inkCost" type="number" min="0" step="0.01" value="0" oninput="inkCost=num(this.value);recalculateOrder()"></div></div><div class="simple-extra-actions"><button type="button" class="btn light" onclick="addMaterialRow()">+ Material</button><button type="button" class="btn light" onclick="addOtherCostRow()">+ Otro gasto</button></div><div id="materialRows"></div><div id="otherCostRows"></div><div class="simple-total"><span>Costo total</span><strong id="orderCostPreview">$0.00</strong></div></div>'''
+          text = text[:a] + simple + text[b:]
+
+          css = '''
+.simple-cost-box{border:1px solid var(--line);background:#fafbff;padding:16px;border-radius:18px}.simple-cost-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.simple-cost-head h3{margin-bottom:8px}.simple-cost-head .auto-cost-note{margin:0;padding:8px 10px}.simple-profit{text-align:right;min-width:130px;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:13px}.simple-profit small{display:block;color:var(--muted);font-weight:800;margin-bottom:4px}.simple-profit strong{font-size:22px}.simple-ink{margin-top:14px}.simple-extra-actions{display:flex;gap:8px;margin:12px 0 4px}.simple-total{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:12px;border-top:1px dashed #d7d9e4}.simple-total span{color:var(--muted);font-weight:800}.simple-total strong{font-size:20px}@media(max-width:560px){.simple-cost-head{align-items:stretch}.simple-profit{min-width:110px}.simple-extra-actions .btn{flex:1}.simple-ink{grid-template-columns:1fr 1fr}.simple-cost-box{padding:13px}}
+'''
+          text = text.replace('</style>', css + '</style>', 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Guardar cambio
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add App.html
+          git commit -m "Simplificar sección de costos de órdenes" || exit 0
+          git push
