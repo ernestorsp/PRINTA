@@ -1,56 +1,301 @@
 const SPREADSHEET_ID='1eOWiWZh0zTnVLnv53bTDXvlFJJG5ZbvR6Upr7_9uLb8';
-const ORDERS_SHEET='ORDENES',EXPENSES_SHEET='GASTOS',PRODUCTS_SHEET='PRODUCTOS',CONFIG_SHEET='CONFIGURACION';
+const ORDERS_SHEET='ORDENES';
+const EXPENSES_SHEET='GASTOS';
+const PRODUCTS_SHEET='PRODUCTOS';
+const CONFIG_SHEET='CONFIGURACION';
 const LOGO_FILE_ID='1KNCCBhFm4vD92Jpi5rdKKgC6xxEWk1ea';
-const APP_CACHE_KEY='PRINTA_APP_DATA_V8';
+const APP_CACHE_KEY='PRINTA_APP_DATA_V9';
 
 function doGet(){
   let html=HtmlService.createTemplateFromFile('App').evaluate().getContent();
   const icon=getLogoDataUrl();
-  html=html.replace('</head>',`<link rel="icon" type="image/png" href="${icon}"><style>.order>.gallery{display:none!important}.btn.saving{position:relative;color:transparent!important;pointer-events:none}.btn.saving:after{content:'';position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-11px 0 0 -11px;border:3px solid #ffffff66;border-top-color:#fff;border-radius:50%;animation:printaSpin .65s linear infinite}.btn.light.saving:after{border-color:#0002;border-top-color:#222}.btn.danger.saving:after{border-color:#b91c1c33;border-top-color:#b91c1c}.btn.good.saving:after{border-color:#16653433;border-top-color:#166534}@keyframes printaSpin{to{transform:rotate(360deg)}}.printa-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:9999;background:#20202d;color:#fff;padding:11px 16px;border-radius:999px;font:700 14px Arial;opacity:0;transition:.2s}.printa-toast.show{opacity:1}</style></head>`);
-  html=html.replace(/function due\(o\)\{.*?\}function photoUrls/,`function due(o){if(o.estado==='Listo')return'Orden lista';const d=dateObj(o.fechaEnvio);if(!d)return'Fecha de entrega pendiente';const nombres=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];return'Entregar antes del '+nombres[d.getDay()]}function photoUrls`);
-  html=html.replace(/function card\(o\)\{.*?\}function orders/,`function card(o){return\`<div class="card order \${color(o)}"><div class="top"><span class="badge \${o.estado==='Listo'?'ready':''}">\${esc(o.estado)}</span><span class="origin">\${esc(o.origen)}</span></div><h3>\${esc(o.cliente)}</h3><p><b>\${esc(o.producto)}</b> × \${esc(o.cantidad)}</p><p>Pagado: <b>\${money(o.pagado)}</b></p><div class="deadline">\${due(o)}</div>\${o.notas?\`<p>\${esc(o.notas)}</p>\`:''}<div class="actions"><button class="btn good" onclick="statusFast('\${o.id}','\${o.estado==='Listo'?'Pendiente':'Listo'}',this)">\${o.estado==='Listo'?'Regresar a pendiente':'✅ Listo'}</button><button class="btn light" onclick="editFast('\${o.id}',this)">Editar</button><button class="btn danger" onclick="removeFast('\${o.id}',this)">Eliminar</button></div></div>\`}function orders`);
-  html=html.replace(/async function submitOrder\(e\)\{.*?\}async function submitExpense/,`async function submitOrder(e){e.preventDefault();const f=e.target,b=f.querySelector('button[type="submit"],button:not([type])'),start=Date.now();const o=Object.fromEntries(new FormData(f).entries());o.cliente=String(f.elements.cliente.value||'').trim();o.producto=String(f.elements.producto.value||'').trim();if(!o.cliente||!o.producto){const x=$('#orderError');x.textContent='Completa cliente y producto.';x.style.display='block';return}setButtonSpin(b,true);const backup=JSON.parse(JSON.stringify(data)),temp=o.id||('TEMP-'+Date.now()+'-'+Math.random().toString(36).slice(2));o.id=temp;o.estado=o.estado||'Pendiente';setTimeout(()=>{const ix=data.orders.findIndex(x=>x.id===temp),item={id:temp,fecha:o.fecha,estado:o.estado,origen:o.origen,cliente:o.cliente,producto:o.producto,cantidad:o.cantidad,notas:o.notas,pagado:o.pagado,fechaEnvio:o.fechaEnvio,foto:o.foto||''};if(ix>=0)data.orders[ix]=item;else data.orders.push(item);render();closeModal('orderModal');toast('Guardando…')},500);try{const old=photoUrls(o.foto),fresh=[];for(const file of pendingFiles)fresh.push(await upload(file,temp,'orden'));o.foto=[...old,...fresh].join('|||');const d=await retryServer('saveOrder',[o]);await waitMinimum(start,500);data=d;pendingFiles=[];render();setButtonSpin(b,false);toast('Guardado')}catch(err){data=backup;render();setButtonSpin(b,false);showModal('orderModal');const x=$('#orderError');x.textContent='No se pudo guardar después de 3 intentos. Toca Guardar nuevamente.';x.style.display='block'}}async function submitExpense`);
-  html=html.replace(/function status\(id,s\)\{.*?\}function removeOrder\(id\)\{.*?\}function removeExpense/,`function setButtonSpin(b,on){if(!b)return;if(on){b.dataset.oldText=b.textContent;b.classList.add('saving');b.disabled=true}else{b.classList.remove('saving');b.disabled=false;if(b.dataset.oldText)b.textContent=b.dataset.oldText}}function waitMinimum(start,ms){return new Promise(r=>setTimeout(r,Math.max(0,ms-(Date.now()-start))))}function toast(t){let x=document.querySelector('.printa-toast');if(!x){x=document.createElement('div');x.className='printa-toast';document.body.appendChild(x)}x.textContent=t;x.classList.add('show');setTimeout(()=>x.classList.remove('show'),1600)}function serverCall(fn,args){return new Promise((ok,no)=>{const r=google.script.run.withSuccessHandler(ok).withFailureHandler(no);r[fn].apply(r,args)})}async function retryServer(fn,args){let err;for(let i=0;i<3;i++){try{return await serverCall(fn,args)}catch(e){err=e;if(i<2)await new Promise(r=>setTimeout(r,450*(i+1)))}}throw err}async function statusFast(id,s,b){const start=Date.now(),i=data.orders.findIndex(x=>x.id===id);if(i<0)return;const old=data.orders[i].estado;setButtonSpin(b,true);data.orders[i].estado=s;render();try{data=await retryServer('setOrderStatus',[id,s]);await waitMinimum(start,500);render()}catch(e){data.orders[i].estado=old;render();toast('No se pudo cambiar')}setButtonSpin(b,false)}async function editFast(id,b){const start=Date.now();setButtonSpin(b,true);await waitMinimum(start,500);setButtonSpin(b,false);editOrder(id)}async function removeFast(id,b){if(!confirm('¿Eliminar esta orden?'))return;const start=Date.now(),backup=JSON.parse(JSON.stringify(data));setButtonSpin(b,true);data.orders=data.orders.filter(x=>x.id!==id);render();try{data=await retryServer('deleteOrder',[id]);await waitMinimum(start,500);render()}catch(e){data=backup;render();toast('No se pudo eliminar')}setButtonSpin(b,false)}function removeExpense`);
-  return HtmlService.createHtmlOutput(html).setTitle('PRINTA').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+
+  html=html.replace('</head>',`<link rel="icon" type="image/png" href="${icon}"><style>
+    .order>.gallery{display:none!important}
+    .btn.saving{position:relative;color:transparent!important;pointer-events:none}
+    .btn.saving:after{content:'';position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-11px 0 0 -11px;border:3px solid #ffffff66;border-top-color:#fff;border-radius:50%;animation:printaSpin .65s linear infinite}
+    .btn.light.saving:after{border-color:#0002;border-top-color:#222}
+    .btn.danger.saving:after{border-color:#b91c1c33;border-top-color:#b91c1c}
+    .btn.good.saving:after{border-color:#16653433;border-top-color:#166534}
+    @keyframes printaSpin{to{transform:rotate(360deg)}}
+    .printa-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:9999;background:#20202d;color:#fff;padding:11px 16px;border-radius:999px;font:700 14px Arial;opacity:0;transition:.2s}
+    .printa-toast.show{opacity:1}
+  </style></head>`);
+
+  html=html.replace(
+    /function due\(o\)\{.*?\}function photoUrls/,
+    `function due(o){if(o.estado==='Listo')return'Orden lista';const d=dateObj(o.fechaEnvio);if(!d)return'Fecha de entrega pendiente';const nombres=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];return'Entregar antes del '+nombres[d.getDay()]}function photoUrls`
+  );
+
+  html=html.replace(
+    /function card\(o\)\{.*?\}function orders/,
+    `function card(o){return\`<div class="card order \${color(o)}"><div class="top"><span class="badge \${o.estado==='Listo'?'ready':''}">\${esc(o.estado)}</span><span class="origin">\${esc(o.origen)}</span></div><h3>\${esc(o.cliente)}</h3><p><b>\${esc(o.producto)}</b> × \${esc(o.cantidad)}</p><p>Pagado: <b>\${money(o.pagado)}</b></p><div class="deadline">\${due(o)}</div>\${o.notas?\`<p>\${esc(o.notas)}</p>\`:''}<div class="actions"><button class="btn good" onclick="statusFast('\${o.id}','\${o.estado==='Listo'?'Pendiente':'Listo'}',this)">\${o.estado==='Listo'?'Regresar a pendiente':'✅ Listo'}</button><button class="btn light" onclick="editFast('\${o.id}',this)">Editar</button><button class="btn danger" onclick="removeFast('\${o.id}',this)">Eliminar</button></div></div>\`}function orders`
+  );
+
+  html=html.replace(
+    /async function submitOrder\(e\)\{.*?\}async function submitExpense/,
+    `async function submitOrder(e){
+      e.preventDefault();
+      const f=e.target;
+      const b=f.querySelector('button[type="submit"],button:not([type])');
+      const start=Date.now();
+      const o=Object.fromEntries(new FormData(f).entries());
+      o.cliente=String(f.elements.cliente.value||'').trim();
+      o.producto=String(f.elements.producto.value||'').trim();
+      if(!o.cliente||!o.producto){const x=$('#orderError');x.textContent='Completa cliente y producto.';x.style.display='block';return}
+
+      const title=String(document.querySelector('#orderTitle')?.textContent||'').toLowerCase();
+      const isEdit=title.includes('editar')&&String(o.id||'').trim()&&!String(o.id).startsWith('TEMP-');
+      const clientKey=isEdit?'':('CLIENT-'+Date.now()+'-'+Math.random().toString(36).slice(2,12));
+      o._mode=isEdit?'edit':'create';
+      o.clientKey=clientKey;
+      if(!isEdit)o.id='';
+
+      setButtonSpin(b,true);
+      const backup=JSON.parse(JSON.stringify(data));
+      const visualId=isEdit?o.id:('PC-'+clientKey);
+      o.estado=o.estado||'Pendiente';
+
+      setTimeout(()=>{
+        const item={id:visualId,fecha:o.fecha,estado:o.estado,origen:o.origen,cliente:o.cliente,producto:o.producto,cantidad:o.cantidad,notas:o.notas,pagado:o.pagado,fechaEnvio:o.fechaEnvio,foto:o.foto||''};
+        if(isEdit){const ix=data.orders.findIndex(x=>x.id===visualId);if(ix>=0)data.orders[ix]=item}
+        else if(!data.orders.some(x=>x.id===visualId))data.orders.push(item);
+        render();closeModal('orderModal');toast('Guardando…')
+      },500);
+
+      try{
+        const old=photoUrls(o.foto),fresh=[];
+        for(const file of pendingFiles)fresh.push(await upload(file,visualId,'orden'));
+        o.foto=[...old,...fresh].join('|||');
+        const d=await retryServer('saveOrder',[o]);
+        await waitMinimum(start,500);
+        data=d;pendingFiles=[];render();setButtonSpin(b,false);toast('Guardado')
+      }catch(err){
+        data=backup;render();setButtonSpin(b,false);showModal('orderModal');
+        const x=$('#orderError');x.textContent='No se pudo guardar después de 3 intentos. Toca Guardar nuevamente.';x.style.display='block'
+      }
+    }async function submitExpense`
+  );
+
+  html=html.replace(
+    /function status\(id,s\)\{.*?\}function removeOrder\(id\)\{.*?\}function removeExpense/,
+    `function setButtonSpin(b,on){if(!b)return;if(on){b.dataset.oldText=b.textContent;b.classList.add('saving');b.disabled=true}else{b.classList.remove('saving');b.disabled=false;if(b.dataset.oldText)b.textContent=b.dataset.oldText}}
+    function waitMinimum(start,ms){return new Promise(r=>setTimeout(r,Math.max(0,ms-(Date.now()-start))))}
+    function toast(t){let x=document.querySelector('.printa-toast');if(!x){x=document.createElement('div');x.className='printa-toast';document.body.appendChild(x)}x.textContent=t;x.classList.add('show');setTimeout(()=>x.classList.remove('show'),1600)}
+    function serverCall(fn,args){return new Promise((ok,no)=>{const r=google.script.run.withSuccessHandler(ok).withFailureHandler(no);r[fn].apply(r,args)})}
+    async function retryServer(fn,args){let err;for(let i=0;i<3;i++){try{return await serverCall(fn,args)}catch(e){err=e;if(i<2)await new Promise(r=>setTimeout(r,450*(i+1)))}}throw err}
+    async function statusFast(id,s,b){const start=Date.now(),i=data.orders.findIndex(x=>x.id===id);if(i<0)return;const old=data.orders[i].estado;setButtonSpin(b,true);data.orders[i].estado=s;render();try{data=await retryServer('setOrderStatus',[id,s]);await waitMinimum(start,500);render()}catch(e){data.orders[i].estado=old;render();toast('No se pudo cambiar')}setButtonSpin(b,false)}
+    async function editFast(id,b){const start=Date.now();setButtonSpin(b,true);await waitMinimum(start,500);setButtonSpin(b,false);editOrder(id)}
+    async function removeFast(id,b){if(!confirm('¿Eliminar esta orden?'))return;const start=Date.now(),backup=JSON.parse(JSON.stringify(data));setButtonSpin(b,true);data.orders=data.orders.filter(x=>x.id!==id);render();try{data=await retryServer('deleteOrder',[id]);await waitMinimum(start,500);render()}catch(e){data=backup;render();toast('No se pudo eliminar')}setButtonSpin(b,false)}
+    function removeExpense`
+  );
+
+  return HtmlService.createHtmlOutput(html)
+    .setTitle('PRINTA')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-function getLogoDataUrl(){try{const b=DriveApp.getFileById(LOGO_FILE_ID).getBlob();return`data:${b.getContentType()};base64,${Utilities.base64Encode(b.getBytes())}`}catch(e){return''}}
-function getAppData(){const c=CacheService.getScriptCache(),v=c.get(APP_CACHE_KEY);if(v){try{return JSON.parse(v)}catch(e){}}const ss=SpreadsheetApp.openById(SPREADSHEET_ID),orders=readRows_(ss.getSheetByName(ORDERS_SHEET)),expenses=readRows_(ss.getSheetByName(EXPENSES_SHEET)),products=readRows_(ss.getSheetByName(PRODUCTS_SHEET)),settings=getSettings_(ss),r={orders,expenses,products,settings,summary:buildSummary_(orders,expenses)};try{c.put(APP_CACHE_KEY,JSON.stringify(r),120)}catch(e){}return r}
+function getLogoDataUrl(){
+  try{
+    const b=DriveApp.getFileById(LOGO_FILE_ID).getBlob();
+    return `data:${b.getContentType()};base64,${Utilities.base64Encode(b.getBytes())}`;
+  }catch(e){return''}
+}
+
+function getAppData(){
+  const c=CacheService.getScriptCache();
+  const v=c.get(APP_CACHE_KEY);
+  if(v){try{return JSON.parse(v)}catch(e){}}
+  const ss=SpreadsheetApp.openById(SPREADSHEET_ID);
+  const orders=readRows_(ss.getSheetByName(ORDERS_SHEET));
+  const expenses=readRows_(ss.getSheetByName(EXPENSES_SHEET));
+  const products=readRows_(ss.getSheetByName(PRODUCTS_SHEET));
+  const settings=getSettings_(ss);
+  const r={orders,expenses,products,settings,summary:buildSummary_(orders,expenses)};
+  try{c.put(APP_CACHE_KEY,JSON.stringify(r),120)}catch(e){}
+  return r;
+}
+
 function invalidateCache_(){try{CacheService.getScriptCache().remove(APP_CACHE_KEY)}catch(e){}}
-function calculateShippingDate(orderDate,origin){const ss=SpreadsheetApp.openById(SPREADSHEET_ID);return addBusinessDays_(parseDate_(orderDate)||new Date(),getHandlingDays_(origin,getSettings_(ss)))}
+
+function calculateShippingDate(orderDate,origin){
+  const ss=SpreadsheetApp.openById(SPREADSHEET_ID);
+  return addBusinessDays_(parseDate_(orderDate)||new Date(),getHandlingDays_(origin,getSettings_(ss)));
+}
+
 function saveOrder(o){
   if(!o||!clean_(o.cliente)||!clean_(o.producto))throw new Error('Completa cliente y producto.');
+  const mode=clean_(o._mode).toLowerCase();
+  if(mode!=='create'&&mode!=='edit')throw new Error('Operación de orden inválida. Recarga la aplicación.');
+
   const lock=LockService.getScriptLock();
   lock.waitLock(30000);
   try{
-    const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(ORDERS_SHEET),now=new Date(),existingId=o.id&&String(o.id).indexOf('TEMP-')!==0?clean_(o.id):'',id=existingId||nextId_(sh,'PC'),fecha=o.fecha||formatDate_(now),envio=addBusinessDays_(parseDate_(fecha)||now,getHandlingDays_(o.origen,getSettings_(ss))),row=[id,fecha,o.estado||'Pendiente',o.origen||'Otro',clean_(o.cliente),clean_(o.producto),number_(o.cantidad,1),clean_(o.notas),money_(o.pagado),envio,clean_(o.foto),o.creadoEn||now,now];
-    if(existingId&&!findRowById_(sh,existingId))throw new Error('La orden que intentas editar ya no existe. Recarga la aplicación.');
-    upsertById_(sh,id,row);
+    const ss=SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sh=ss.getSheetByName(ORDERS_SHEET);
+    const now=new Date();
+    const fecha=o.fecha||formatDate_(now);
+    const envio=addBusinessDays_(parseDate_(fecha)||now,getHandlingDays_(o.origen,getSettings_(ss)));
+
+    if(mode==='create'){
+      const clientKey=clean_(o.clientKey).replace(/[^A-Za-z0-9_-]/g,'');
+      if(!clientKey)throw new Error('Falta el identificador de creación. Toca Guardar nuevamente.');
+      const id='PC-'+clientKey;
+      const matches=findRowsById_(sh,id);
+
+      // Reintento idempotente: si el primer intento sí guardó, no vuelve a escribir ni duplica.
+      if(matches.length===1){
+        invalidateCache_();
+        return getAppData();
+      }
+      if(matches.length>1)throw new Error('Se detectaron IDs duplicados. No se modificó ninguna orden.');
+
+      const row=[id,fecha,o.estado||'Pendiente',o.origen||'Otro',clean_(o.cliente),clean_(o.producto),number_(o.cantidad,1),clean_(o.notas),money_(o.pagado),envio,clean_(o.foto),now,now];
+      sh.appendRow(row); // Crear siempre agrega una fila. Nunca actualiza otra.
+    }else{
+      const id=clean_(o.id);
+      if(!id)throw new Error('Falta el ID de la orden que quieres editar.');
+      const matches=findRowsById_(sh,id);
+      if(matches.length===0)throw new Error('La orden que intentas editar ya no existe. Recarga la aplicación.');
+      if(matches.length>1)throw new Error('Esta orden tiene un ID duplicado. No se modificó ninguna fila.');
+
+      const rowNumber=matches[0];
+      const oldCreated=sh.getRange(rowNumber,12).getValue()||now;
+      const row=[id,fecha,o.estado||'Pendiente',o.origen||'Otro',clean_(o.cliente),clean_(o.producto),number_(o.cantidad,1),clean_(o.notas),money_(o.pagado),envio,clean_(o.foto),oldCreated,now];
+      sh.getRange(rowNumber,1,1,row.length).setValues([row]); // Editar solo toca la fila exacta.
+    }
+
+    invalidateCache_();
+  }finally{
+    lock.releaseLock();
+  }
+  return getAppData();
+}
+
+function setOrderStatus(id,status){
+  if(!['Pendiente','Listo'].includes(status))throw new Error('Estado inválido.');
+  const lock=LockService.getScriptLock();
+  lock.waitLock(30000);
+  try{
+    const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(ORDERS_SHEET);
+    const matches=findRowsById_(sh,id);
+    if(matches.length===0)throw new Error('Orden no encontrada.');
+    if(matches.length>1)throw new Error('ID duplicado: no se cambió ninguna orden.');
+    sh.getRange(matches[0],3).setValue(status);
+    sh.getRange(matches[0],13).setValue(new Date());
     invalidateCache_();
   }finally{lock.releaseLock()}
   return getAppData();
 }
-function setOrderStatus(id,status){if(!['Pendiente','Listo'].includes(status))throw new Error('Estado inválido.');const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(ORDERS_SHEET),r=findRowById_(sh,id);if(!r)throw new Error('Orden no encontrada.');sh.getRange(r,3).setValue(status);sh.getRange(r,13).setValue(new Date());invalidateCache_();return getAppData()}
-function deleteOrder(id){deleteById_(ORDERS_SHEET,id);invalidateCache_();return getAppData()}
-function saveExpense(e){if(!e||money_(e.cantidad)<=0)throw new Error('Escribe una cantidad válida.');const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(EXPENSES_SHEET),now=new Date(),id=e.id||nextId_(sh,'GA');upsertById_(sh,id,[id,e.fecha||formatDate_(now),e.categoria||'Otro',clean_(e.lugar),money_(e.cantidad),clean_(e.nota),clean_(e.recibo),e.creadoEn||now]);invalidateCache_();return getAppData()}
+
+function deleteOrder(id){
+  const lock=LockService.getScriptLock();
+  lock.waitLock(30000);
+  try{
+    const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(ORDERS_SHEET);
+    const matches=findRowsById_(sh,id);
+    if(matches.length===0)throw new Error('Orden no encontrada.');
+    if(matches.length>1)throw new Error('ID duplicado: no se borró ninguna orden.');
+    sh.deleteRow(matches[0]);
+    invalidateCache_();
+  }finally{lock.releaseLock()}
+  return getAppData();
+}
+
+function saveExpense(e){
+  if(!e||money_(e.cantidad)<=0)throw new Error('Escribe una cantidad válida.');
+  const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(EXPENSES_SHEET);
+  const now=new Date(),id=e.id||nextId_('GA');
+  upsertById_(sh,id,[id,e.fecha||formatDate_(now),e.categoria||'Otro',clean_(e.lugar),money_(e.cantidad),clean_(e.nota),clean_(e.recibo),e.creadoEn||now]);
+  invalidateCache_();
+  return getAppData();
+}
+
 function deleteExpense(id){deleteById_(EXPENSES_SHEET,id);invalidateCache_();return getAppData()}
-function saveProduct(p){if(!p||!clean_(p.nombre))throw new Error('Escribe el nombre del producto.');const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(PRODUCTS_SHEET),now=new Date(),id=p.id||nextId_(sh,'PR');upsertById_(sh,id,[id,clean_(p.nombre),clean_(p.foto),String(p.disponible)!=='false',p.creadoEn||now,now]);invalidateCache_();return getAppData()}
+
+function saveProduct(p){
+  if(!p||!clean_(p.nombre))throw new Error('Escribe el nombre del producto.');
+  const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(PRODUCTS_SHEET);
+  const now=new Date(),id=p.id||nextId_('PR');
+  upsertById_(sh,id,[id,clean_(p.nombre),clean_(p.foto),String(p.disponible)!=='false',p.creadoEn||now,now]);
+  invalidateCache_();
+  return getAppData();
+}
+
 function deleteProduct(id){deleteById_(PRODUCTS_SHEET,id);invalidateCache_();return getAppData()}
-function uploadFile(fileData,fileName,mimeType,ownerId,category){if(!fileData)return'';const bytes=Utilities.base64Decode(String(fileData).split(',').pop()),safe=`${ownerId||'GENERAL'}_${category||'archivo'}_${Date.now()}_${fileName||'archivo'}`,f=getUploadsFolder_().createFile(Utilities.newBlob(bytes,mimeType||'application/octet-stream',safe));f.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);return f.getUrl()}
-function getUploadsFolder_(){const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(CONFIG_SHEET),v=sh.getRange(1,1,Math.max(sh.getLastRow(),1),2).getValues();let id='',row=0;v.forEach((x,i)=>{if(x[0]==='CARPETA_FOTOS_ID'){id=x[1];row=i+1}});if(id){try{return DriveApp.getFolderById(id)}catch(e){}}const f=DriveApp.createFolder('PRINTA - Fotos y recibos');if(row)sh.getRange(row,2).setValue(f.getId());return f}
-function getSettings_(ss){const sh=ss.getSheetByName(CONFIG_SHEET),rows=sh.getRange(1,1,Math.max(sh.getLastRow(),1),2).getValues(),o={tiktokDays:2,printaDays:3};rows.forEach(r=>{if(r[0]==='TIKTOK_DIAS_ENVIO')o.tiktokDays=number_(r[1],2);if(r[0]==='PRINTA_DIAS_ENVIO')o.printaDays=number_(r[1],3)});return o}
+
+function uploadFile(fileData,fileName,mimeType,ownerId,category){
+  if(!fileData)return'';
+  const bytes=Utilities.base64Decode(String(fileData).split(',').pop());
+  const safe=`${ownerId||'GENERAL'}_${category||'archivo'}_${Date.now()}_${fileName||'archivo'}`;
+  const f=getUploadsFolder_().createFile(Utilities.newBlob(bytes,mimeType||'application/octet-stream',safe));
+  f.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);
+  return f.getUrl();
+}
+
+function getUploadsFolder_(){
+  const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(CONFIG_SHEET);
+  const v=sh.getRange(1,1,Math.max(sh.getLastRow(),1),2).getValues();
+  let id='',row=0;
+  v.forEach((x,i)=>{if(x[0]==='CARPETA_FOTOS_ID'){id=x[1];row=i+1}});
+  if(id){try{return DriveApp.getFolderById(id)}catch(e){}}
+  const f=DriveApp.createFolder('PRINTA - Fotos y recibos');
+  if(row)sh.getRange(row,2).setValue(f.getId());
+  return f;
+}
+
+function getSettings_(ss){
+  const sh=ss.getSheetByName(CONFIG_SHEET);
+  const rows=sh.getRange(1,1,Math.max(sh.getLastRow(),1),2).getValues();
+  const o={tiktokDays:2,printaDays:3};
+  rows.forEach(r=>{if(r[0]==='TIKTOK_DIAS_ENVIO')o.tiktokDays=number_(r[1],2);if(r[0]==='PRINTA_DIAS_ENVIO')o.printaDays=number_(r[1],3)});
+  return o;
+}
+
 function getHandlingDays_(origin,s){return origin==='TikTok'?s.tiktokDays:s.printaDays}
 function addBusinessDays_(date,days){const d=new Date(date);let a=0;while(a<days){d.setDate(d.getDate()+1);if(d.getDay()!==0&&d.getDay()!==6)a++}return formatDate_(d)}
 function parseDate_(v){if(!v)return null;const p=String(v).split('-').map(Number);return p.length===3?new Date(p[0],p[1]-1,p[2],12):new Date(v)}
-function readRows_(sh){if(!sh||sh.getLastRow()<2)return[];const vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getDisplayValues(),h=vals.shift();return vals.filter(r=>r[0]).map(r=>{const o={};h.forEach((x,i)=>o[toKey_(x)]=r[i]);return o})}
-function buildSummary_(o,e){const m=Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'yyyy-MM'),mo=o.filter(x=>String(x.fecha||'').startsWith(m)),me=e.filter(x=>String(x.fecha||'').startsWith(m)),ing=mo.reduce((s,x)=>s+money_(x.pagado),0),gas=me.reduce((s,x)=>s+money_(x.cantidad),0);return{pendientes:o.filter(x=>x.estado==='Pendiente').length,listos:o.filter(x=>x.estado==='Listo').length,ingresos:ing,gastos:gas,ganancia:ing-gas,tiktok:mo.filter(x=>x.origen==='TikTok').reduce((s,x)=>s+money_(x.pagado),0),printaCrea:mo.filter(x=>x.origen==='Printa Crea').reduce((s,x)=>s+money_(x.pagado),0)}}
-function upsertById_(sh,id,row){const r=findRowById_(sh,id);r?sh.getRange(r,1,1,row.length).setValues([row]):sh.appendRow(row)}
-function deleteById_(name,id){const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(name),r=findRowById_(sh,id);if(r)sh.deleteRow(r)}
-function findRowById_(sh,id){if(sh.getLastRow()<2)return 0;const m=sh.getRange(2,1,sh.getLastRow()-1,1).createTextFinder(String(id)).matchEntireCell(true).findNext();return m?m.getRow():0}
-function nextId_(sh,p){
-  const uuid=Utilities.getUuid().replace(/-/g,'').slice(0,12).toUpperCase();
-  return `${p}-${uuid}`;
+
+function readRows_(sh){
+  if(!sh||sh.getLastRow()<2)return[];
+  const vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getDisplayValues();
+  const h=vals.shift();
+  return vals.filter(r=>r[0]).map(r=>{const o={};h.forEach((x,i)=>o[toKey_(x)]=r[i]);return o});
 }
+
+function buildSummary_(o,e){
+  const m=Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'yyyy-MM');
+  const mo=o.filter(x=>String(x.fecha||'').startsWith(m));
+  const me=e.filter(x=>String(x.fecha||'').startsWith(m));
+  const ing=mo.reduce((s,x)=>s+money_(x.pagado),0),gas=me.reduce((s,x)=>s+money_(x.cantidad),0);
+  return{pendientes:o.filter(x=>x.estado==='Pendiente').length,listos:o.filter(x=>x.estado==='Listo').length,ingresos:ing,gastos:gas,ganancia:ing-gas,tiktok:mo.filter(x=>x.origen==='TikTok').reduce((s,x)=>s+money_(x.pagado),0),printaCrea:mo.filter(x=>x.origen==='Printa Crea').reduce((s,x)=>s+money_(x.pagado),0)};
+}
+
+function upsertById_(sh,id,row){
+  const matches=findRowsById_(sh,id);
+  if(matches.length>1)throw new Error('ID duplicado: no se modificó ninguna fila.');
+  if(matches.length===1)sh.getRange(matches[0],1,1,row.length).setValues([row]);
+  else sh.appendRow(row);
+}
+
+function deleteById_(name,id){
+  const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(name);
+  const matches=findRowsById_(sh,id);
+  if(matches.length>1)throw new Error('ID duplicado: no se borró ninguna fila.');
+  if(matches.length===1)sh.deleteRow(matches[0]);
+}
+
+function findRowsById_(sh,id){
+  if(!sh||sh.getLastRow()<2||!clean_(id))return[];
+  const values=sh.getRange(2,1,sh.getLastRow()-1,1).getDisplayValues();
+  const target=clean_(id);
+  const rows=[];
+  values.forEach((r,i)=>{if(clean_(r[0])===target)rows.push(i+2)});
+  return rows;
+}
+
+function findRowById_(sh,id){const rows=findRowsById_(sh,id);return rows.length===1?rows[0]:0}
+function nextId_(prefix){return `${prefix}-${Utilities.getUuid().replace(/-/g,'').toUpperCase()}`}
 function formatDate_(d){return Utilities.formatDate(d,'America/New_York','yyyy-MM-dd')}
 function money_(v){const n=Number(String(v||0).replace(/[^0-9.-]/g,''));return isNaN(n)?0:n}
 function number_(v,f){const n=Number(v);return isNaN(n)?f:n}
