@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#7c3aed">
+  <title>PRINTA</title>
+  <style>
+    *{box-sizing:border-box}
+    html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#f5f6fb}
+    body{font-family:Arial,sans-serif}
+    iframe{display:block;width:100%;height:100%;border:0;background:#f5f6fb}
+    .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#7c3aed,#ff2f92);color:#fff;font-weight:800;z-index:2;transition:opacity .25s ease}
+    .loading.hide{opacity:0;pointer-events:none}
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">Abriendo PRINTA…</div>
+  <iframe
+    src="https://script.google.com/macros/s/AKfycbxu7sP95_T9YECa9VmjuBgdG-HTJqYipsLWWQqOmdfujRzq8k5Wx265e1gmzcKVqIA/exec"
+    title="PRINTA"
+    allow="camera; clipboard-read; clipboard-write"
+    onload="document.getElementById('loading').classList.add('hide')">
+  </iframe>
+</body>
+</html>
