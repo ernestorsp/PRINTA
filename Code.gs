@@ -26,7 +26,7 @@ function getAppData(){
 function invalidateCache_(){try{CacheService.getScriptCache().remove(APP_CACHE_KEY)}catch(e){}}
 
 function calculateShippingDate(orderDate,origin){const ss=SpreadsheetApp.openById(SPREADSHEET_ID),settings=getSettings_(ss);return addBusinessDays_(parseDate_(orderDate)||new Date(),getHandlingDays_(origin,settings))}
-function saveOrder(o){if(!o||!clean_(o.cliente)||!clean_(o.producto))throw new Error('Completa cliente y producto.');const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(ORDERS_SHEET),now=new Date(),id=o.id||nextId_(sh,'PC'),orderDate=o.fecha||formatDate_(now),settings=getSettings_(ss),shippingDate=addBusinessDays_(parseDate_(orderDate)||now,getHandlingDays_(o.origen,settings)),row=[id,orderDate,o.estado||'Pendiente',o.origen||'Otro',clean_(o.cliente),clean_(o.producto),number_(o.cantidad,1),clean_(o.notas),money_(o.pagado),shippingDate,clean_(o.foto),o.creadoEn||now,now];upsertById_(sh,id,row);invalidateCache_();return getAppData()}
+function saveOrder(o){if(!o||!clean_(o.cliente)||!clean_(o.producto))throw new Error('Completa cliente y producto.');const ss=SpreadsheetApp.openById(SPREADSHEET_ID),sh=ss.getSheetByName(ORDERS_SHEET),now=new Date(),id=o.id&&String(o.id).indexOf('TEMP-')!==0?o.id:nextId_(sh,'PC'),orderDate=o.fecha||formatDate_(now),settings=getSettings_(ss),shippingDate=addBusinessDays_(parseDate_(orderDate)||now,getHandlingDays_(o.origen,settings)),row=[id,orderDate,o.estado||'Pendiente',o.origen||'Otro',clean_(o.cliente),clean_(o.producto),number_(o.cantidad,1),clean_(o.notas),money_(o.pagado),shippingDate,clean_(o.foto),o.creadoEn||now,now];upsertById_(sh,id,row);invalidateCache_();return getAppData()}
 function setOrderStatus(id,status){if(!['Pendiente','Listo'].includes(status))throw new Error('Estado inválido.');const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(ORDERS_SHEET),r=findRowById_(sh,id);if(!r)throw new Error('Orden no encontrada.');sh.getRange(r,3).setValue(status);sh.getRange(r,13).setValue(new Date());invalidateCache_();return getAppData()}
 function deleteOrder(id){deleteById_(ORDERS_SHEET,id);invalidateCache_();return getAppData()}
 function saveExpense(e){if(!e||money_(e.cantidad)<=0)throw new Error('Escribe una cantidad válida.');const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(EXPENSES_SHEET),now=new Date(),id=e.id||nextId_(sh,'GA');upsertById_(sh,id,[id,e.fecha||formatDate_(now),e.categoria||'Otro',clean_(e.lugar),money_(e.cantidad),clean_(e.nota),clean_(e.recibo),e.creadoEn||now]);invalidateCache_();return getAppData()}
@@ -54,51 +54,51 @@ function toKey_(h){return String(h).toLowerCase().replace(/_([a-z])/g,(_,c)=>c.t
 
 function clientEnhancements_(){return `
 <style>
-.btn.saving{position:relative;color:transparent!important;pointer-events:none}.btn.saving:after{content:'';position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-11px 0 0 -11px;border:3px solid #ffffff66;border-top-color:#fff;border-radius:50%;animation:printaSpin .65s linear infinite}@keyframes printaSpin{to{transform:rotate(360deg)}}
+.order>.gallery{display:none!important}
+.btn.saving{position:relative;color:transparent!important;pointer-events:none}.btn.saving:after{content:'';position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-11px 0 0 -11px;border:3px solid #ffffff66;border-top-color:#fff;border-radius:50%;animation:printaSpin .65s linear infinite}.btn.light.saving:after{border-color:#0002;border-top-color:#222}.btn.danger.saving:after{border-color:#b91c1c33;border-top-color:#b91c1c}.btn.good.saving:after{border-color:#16653433;border-top-color:#166534}@keyframes printaSpin{to{transform:rotate(360deg)}}
 .printa-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:9999;background:#20202d;color:#fff;padding:11px 16px;border-radius:999px;font:700 14px Arial;box-shadow:0 10px 30px #0004;opacity:0;transition:.2s;pointer-events:none}.printa-toast.show{opacity:1}
 </style>
 <script>
 (function(){
-  const CACHE_KEY='PRINTA_LOCAL_CACHE_V3';
+  const CACHE_KEY='PRINTA_LOCAL_CACHE_V4';
+  const DAY_NAMES=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
   let toast=document.createElement('div');toast.className='printa-toast';document.body.appendChild(toast);
   function notify(t){toast.textContent=t;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),1800)}
   function cacheData(d){try{localStorage.setItem(CACHE_KEY,JSON.stringify({time:Date.now(),data:d}))}catch(e){}}
   function readCache(){try{const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'null');return c&&c.data?c.data:null}catch(e){return null}}
+  function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+  function setSpin(btn,on){if(!btn)return;if(on){btn.dataset.oldText=btn.textContent;btn.classList.add('saving');btn.disabled=true}else{btn.classList.remove('saving');btn.disabled=false;if(btn.dataset.oldText)btn.textContent=btn.dataset.oldText}}
+  function callServer(fn,arg){return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](arg))}
+  async function retryCall(fn,arg){let last;for(let attempt=0;attempt<3;attempt++){try{return await callServer(fn,arg)}catch(e){last=e;if(attempt<2)await sleep(450*(attempt+1))}}throw last}
+  function reopenForm(form,error){const modal=form.closest('.modal');if(modal){modal.classList.add('show');document.body.style.overflow='hidden'}const box=form.querySelector('.error');if(box){box.textContent='No se pudo guardar después de 3 intentos. Revisa la conexión y toca Guardar nuevamente.';box.style.display='block'}notify('No se pudo guardar')}
+  function weekdayLabel(value){const d=dateObj(value);return d?DAY_NAMES[d.getDay()]:''}
+
+  due=function(o){if(o.estado==='Listo')return'Orden lista';const name=weekdayLabel(o.fechaEnvio);return name?'Entregar antes del '+name.charAt(0).toUpperCase()+name.slice(1):'Fecha de entrega pendiente'};
+  card=function(o){return '<div class="card order '+color(o)+'"><div class="top"><span class="badge '+(o.estado==='Listo'?'ready':'')+'">'+esc(o.estado)+'</span><span class="origin">'+esc(o.origen)+'</span></div><h3>'+esc(o.cliente)+'</h3><p><b>'+esc(o.producto)+'</b> × '+esc(o.cantidad)+'</p><p>Pagado: <b>'+money(o.pagado)+'</b></p><div class="deadline">'+due(o)+'</div>'+(o.notas?'<p>'+esc(o.notas)+'</p>':'')+'<div class="actions"><button class="btn good" onclick="status(\''+o.id+'\',\''+(o.estado==='Listo'?'Pendiente':'Listo')+'\',this)">'+(o.estado==='Listo'?'Regresar a pendiente':'LISTO')+'</button><button class="btn light" onclick="editOrderWithSpin(\''+o.id+'\',this)">Editar</button><button class="btn danger" onclick="removeOrder(\''+o.id+'\',this)">Eliminar</button></div></div>'};
+
   const baseRender=render;render=function(){baseRender();cacheData(data)};
+  window.onload=function(){const cached=readCache();if(cached){data=cached;const fm=document.querySelector('#financeMonth');if(fm&&!fm.value)fm.value=currentMonth();render();document.body.classList.remove('loading')}else document.body.classList.add('loading');google.script.run.withSuccessHandler(function(d){data=d;cacheData(d);const fm=document.querySelector('#financeMonth');if(fm&&!fm.value)fm.value=currentMonth();render();document.body.classList.remove('loading')}).withFailureHandler(function(e){document.body.classList.remove('loading');if(!cached)showGlobalError(e)}).getAppData()};
 
-  busy=function(f,v){
-    f.querySelectorAll('button').forEach(function(b){b.disabled=v});
+  submitOrder=async function(e){
+    e.preventDefault();const f=e.target,btn=f.querySelector('button[type="submit"],button:not([type])'),started=Date.now();
+    const o=Object.fromEntries(new FormData(f).entries());o.cliente=String(f.cliente.value||'').trim();o.producto=String(f.producto.value||'').trim();
+    if(!o.cliente||!o.producto){const box=document.querySelector('#orderError');box.textContent='Completa cliente y producto.';box.style.display='block';return}
+    const oldData=JSON.parse(JSON.stringify(data)),existing=data.orders.findIndex(x=>x.id===o.id),tempId=o.id||('TEMP-'+Date.now());o.id=tempId;o.estado=o.estado||'Pendiente';
+    const optimistic={id:tempId,fecha:o.fecha,estado:o.estado,origen:o.origen,cliente:o.cliente,producto:o.producto,cantidad:o.cantidad,notas:o.notas,pagado:o.pagado,fechaEnvio:o.fechaEnvio,foto:o.foto||'',creadoEn:o.creadoEn||new Date().toISOString()};
+    setSpin(btn,true);
+    setTimeout(function(){if(f.closest('.modal').classList.contains('show')){if(existing>=0)data.orders[existing]=optimistic;else data.orders.push(optimistic);render();closeModal('orderModal');notify('Guardando…')}},500);
+    try{
+      const old=photoUrls(o.foto),fresh=[];for(const file of pendingFiles)fresh.push(await upload(file,tempId,'orden'));o.foto=[...old,...fresh].join('|||');f.foto.value=o.foto;pendingFiles=[];renderPendingFiles();
+      const d=await retryCall('saveOrder',o);await sleep(Math.max(0,500-(Date.now()-started)));data=d;render();setSpin(btn,false);notify('Guardado');
+    }catch(err){await sleep(Math.max(0,500-(Date.now()-started)));data=oldData;render();setSpin(btn,false);reopenForm(f,err)}
   };
 
-  window.onload=function(){
-    const cached=readCache();
-    if(cached){data=cached;const fm=document.querySelector('#financeMonth');if(fm&&!fm.value)fm.value=currentMonth();render();document.body.classList.remove('loading')}
-    else document.body.classList.add('loading');
-    google.script.run.withSuccessHandler(function(d){data=d;cacheData(d);const fm=document.querySelector('#financeMonth');if(fm&&!fm.value)fm.value=currentMonth();render();document.body.classList.remove('loading')}).withFailureHandler(function(e){document.body.classList.remove('loading');if(!cached)showGlobalError(e)}).getAppData();
-  };
+  submitExpense=async function(e){e.preventDefault();const f=e.target,btn=f.querySelector('button[type="submit"],button:not([type])'),started=Date.now(),o=Object.fromEntries(new FormData(f).entries());setSpin(btn,true);setTimeout(()=>{closeModal('expenseModal');notify('Guardando…')},500);try{if(document.querySelector('#receiptFile').files[0])o.recibo=await upload(document.querySelector('#receiptFile').files[0],'GASTO','recibo');const d=await retryCall('saveExpense',o);await sleep(Math.max(0,500-(Date.now()-started)));data=d;render();setSpin(btn,false);notify('Guardado')}catch(err){setSpin(btn,false);reopenForm(f,err)}};
+  submitProduct=async function(e){e.preventDefault();const f=e.target,btn=f.querySelector('button[type="submit"],button:not([type])'),started=Date.now(),o=Object.fromEntries(new FormData(f).entries());setSpin(btn,true);setTimeout(()=>{closeModal('productModal');notify('Guardando…')},500);try{if(document.querySelector('#productImage').files[0])o.foto=await upload(document.querySelector('#productImage').files[0],o.id||'PRODUCTO','producto');const d=await retryCall('saveProduct',o);await sleep(Math.max(0,500-(Date.now()-started)));data=d;render();setSpin(btn,false);notify('Guardado')}catch(err){setSpin(btn,false);reopenForm(f,err)}};
 
-  document.addEventListener('submit',function(e){
-    const f=e.target;if(!['orderForm','expenseForm','productForm'].includes(f.id))return;
-    const b=f.querySelector('button[type="submit"],button:not([type])');if(!b)return;
-    f.dataset.saveStarted=Date.now();b.dataset.oldText=b.textContent;b.classList.add('saving');
-  },true);
-
-  const baseDone=done;done=function(d,m,f){
-    const elapsed=Date.now()-Number(f.dataset.saveStarted||Date.now()),wait=Math.max(0,500-elapsed);
-    setTimeout(function(){
-      cacheData(d);
-      baseDone(d,m,f);
-      const b=f.querySelector('button[type="submit"],button:not([type])');
-      if(b){b.classList.remove('saving');if(b.dataset.oldText)b.textContent=b.dataset.oldText}
-      notify('Guardado');
-    },wait);
-  };
-
-  const baseFail=fail;fail=function(id,e,f){
-    const b=f&&f.querySelector('button[type="submit"],button:not([type])');
-    if(b){b.classList.remove('saving');if(b.dataset.oldText)b.textContent=b.dataset.oldText}
-    notify('No se pudo guardar');
-    baseFail(id,e,f);
-  };
+  status=async function(id,s,btn){const index=data.orders.findIndex(x=>x.id===id);if(index<0)return;const old=data.orders[index].estado;setSpin(btn,true);data.orders[index].estado=s;render();try{const d=await Promise.all([retryCall('setOrderStatus',{id:id,status:s}).catch(()=>retryCallStatus(id,s)),sleep(500)]).then(x=>x[0]);data=d;render();setSpin(btn,false)}catch(e){data.orders[index].estado=old;render();setSpin(btn,false);notify('No se pudo cambiar el estado')}};
+  async function retryCallStatus(id,s){let last;for(let i=0;i<3;i++){try{return await new Promise((res,rej)=>google.script.run.withSuccessHandler(res).withFailureHandler(rej).setOrderStatus(id,s))}catch(e){last=e;if(i<2)await sleep(450*(i+1))}}throw last}
+  editOrderWithSpin=async function(id,btn){setSpin(btn,true);await sleep(500);setSpin(btn,false);editOrder(id)};
+  removeOrder=async function(id,btn){if(!confirm('¿Eliminar esta orden?'))return;const index=data.orders.findIndex(x=>x.id===id);if(index<0)return;const removed=data.orders[index];setSpin(btn,true);data.orders.splice(index,1);render();try{let d,last;for(let i=0;i<3;i++){try{d=await new Promise((res,rej)=>google.script.run.withSuccessHandler(res).withFailureHandler(rej).deleteOrder(id));break}catch(e){last=e;if(i<2)await sleep(450*(i+1));else throw last}}await sleep(500);data=d;render();setSpin(btn,false)}catch(e){data.orders.splice(index,0,removed);render();setSpin(btn,false);notify('No se pudo eliminar')}};
 })();
 </script>`}
