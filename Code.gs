@@ -60,7 +60,7 @@ function clientEnhancements_(){return `
 </style>
 <script>
 (function(){
-  const CACHE_KEY='PRINTA_LOCAL_CACHE_V4';
+  const CACHE_KEY='PRINTA_LOCAL_CACHE_V5';
   const DAY_NAMES=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
   let toast=document.createElement('div');toast.className='printa-toast';document.body.appendChild(toast);
   function notify(t){toast.textContent=t;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),1800)}
@@ -73,8 +73,8 @@ function clientEnhancements_(){return `
   function reopenForm(form,error){const modal=form.closest('.modal');if(modal){modal.classList.add('show');document.body.style.overflow='hidden'}const box=form.querySelector('.error');if(box){box.textContent='No se pudo guardar después de 3 intentos. Revisa la conexión y toca Guardar nuevamente.';box.style.display='block'}notify('No se pudo guardar')}
   function weekdayLabel(value){const d=dateObj(value);return d?DAY_NAMES[d.getDay()]:''}
 
-  due=function(o){if(o.estado==='Listo')return'Orden lista';const name=weekdayLabel(o.fechaEnvio);return name?'Entregar antes del '+name.charAt(0).toUpperCase()+name.slice(1):'Fecha de entrega pendiente'};
-  card=function(o){return '<div class="card order '+color(o)+'"><div class="top"><span class="badge '+(o.estado==='Listo'?'ready':'')+'">'+esc(o.estado)+'</span><span class="origin">'+esc(o.origen)+'</span></div><h3>'+esc(o.cliente)+'</h3><p><b>'+esc(o.producto)+'</b> × '+esc(o.cantidad)+'</p><p>Pagado: <b>'+money(o.pagado)+'</b></p><div class="deadline">'+due(o)+'</div>'+(o.notas?'<p>'+esc(o.notas)+'</p>':'')+'<div class="actions"><button class="btn good" onclick="status(\''+o.id+'\',\''+(o.estado==='Listo'?'Pendiente':'Listo')+'\',this)">'+(o.estado==='Listo'?'Regresar a pendiente':'LISTO')+'</button><button class="btn light" onclick="editOrderWithSpin(\''+o.id+'\',this)">Editar</button><button class="btn danger" onclick="removeOrder(\''+o.id+'\',this)">Eliminar</button></div></div>'};
+  due=function(o){if(o.estado==='Listo')return'Orden lista';const name=weekdayLabel(o.fechaEnvio);return name?'Entregar antes del '+name:'Fecha de entrega pendiente'};
+  card=function(o){return '<div class="card order '+color(o)+'"><div class="top"><span class="badge '+(o.estado==='Listo'?'ready':'')+'">'+esc(o.estado)+'</span><span class="origin">'+esc(o.origen)+'</span></div><h3>'+esc(o.cliente)+'</h3><p><b>'+esc(o.producto)+'</b> × '+esc(o.cantidad)+'</p><p>Pagado: <b>'+money(o.pagado)+'</b></p><div class="deadline">'+due(o)+'</div>'+(o.notas?'<p>'+esc(o.notas)+'</p>':'')+'<div class="actions"><button class="btn good" onclick="status(\''+o.id+'\',\''+(o.estado==='Listo'?'Pendiente':'Listo')+'\',this)">'+(o.estado==='Listo'?'Regresar a pendiente':'✅ Listo')+'</button><button class="btn light" onclick="editOrderWithSpin(\''+o.id+'\',this)">Editar</button><button class="btn danger" onclick="removeOrder(\''+o.id+'\',this)">Eliminar</button></div></div>'};
 
   const baseRender=render;render=function(){baseRender();cacheData(data)};
   window.onload=function(){const cached=readCache();if(cached){data=cached;const fm=document.querySelector('#financeMonth');if(fm&&!fm.value)fm.value=currentMonth();render();document.body.classList.remove('loading')}else document.body.classList.add('loading');google.script.run.withSuccessHandler(function(d){data=d;cacheData(d);const fm=document.querySelector('#financeMonth');if(fm&&!fm.value)fm.value=currentMonth();render();document.body.classList.remove('loading')}).withFailureHandler(function(e){document.body.classList.remove('loading');if(!cached)showGlobalError(e)}).getAppData()};
