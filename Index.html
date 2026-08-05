@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{--bg:#f6f7fb;--card:#fff;--ink:#18181b;--muted:#71717a;--accent:#111827;--green:#15803d;--red:#b91c1c;--line:#e4e4e7}
+    *{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--ink)}
+    header{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);padding:14px 18px;display:flex;justify-content:space-between;align-items:center}
+    h1{font-size:22px;margin:0}.wrap{max-width:1100px;margin:auto;padding:18px}.tabs{display:flex;gap:8px;margin-bottom:16px}.tabs button,.btn{border:0;border-radius:10px;padding:11px 14px;font-weight:700;cursor:pointer}.tabs button{background:#e4e4e7}.tabs button.active,.btn.primary{background:var(--accent);color:#fff}.btn.good{background:#dcfce7;color:#166534}.btn.danger{background:#fee2e2;color:#991b1b}.btn.light{background:#f4f4f5}.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px;box-shadow:0 2px 8px #00000008}.metric small{color:var(--muted)}.metric strong{display:block;font-size:24px;margin-top:5px}.section{display:none}.section.active{display:block}.toolbar{display:flex;justify-content:space-between;gap:10px;margin:18px 0;flex-wrap:wrap}.orders{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.order h3{margin:0 0 8px}.order p{margin:5px 0;color:#3f3f46}.badge{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:700;background:#f4f4f5}.badge.pending{background:#fef3c7;color:#92400e}.badge.ready{background:#dcfce7;color:#166534}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;padding:16px;z-index:10}.modal.show{display:flex}.panel{background:#fff;border-radius:16px;padding:20px;width:min(760px,100%);max-height:92vh;overflow:auto}.panel h2{margin-top:0}.form{display:grid;grid-template-columns:1fr 1fr;gap:12px}.full{grid-column:1/-1}label{font-size:13px;font-weight:700;display:block;margin-bottom:5px}input,select,textarea{width:100%;padding:11px;border:1px solid #d4d4d8;border-radius:9px;font:inherit}textarea{min-height:90px;resize:vertical}.empty{text-align:center;color:var(--muted);padding:32px}.money{font-variant-numeric:tabular-nums}.error{background:#fee2e2;color:#991b1b;padding:10px;border-radius:8px;margin-bottom:10px;display:none}.loading{opacity:.55;pointer-events:none}@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}.orders{grid-template-columns:1fr}.form{grid-template-columns:1fr}.full{grid-column:auto}}
+  </style>
+</head>
+<body>
+<header><h1>PRINTA</h1><button class="btn primary" onclick="openOrder()">+ Nueva orden</button></header>
+<div class="wrap">
+  <div class="tabs">
+    <button class="active" onclick="showTab('inicio',this)">Inicio</button>
+    <button onclick="showTab('ordenes',this)">Órdenes</button>
+    <button onclick="showTab('finanzas',this)">Finanzas</button>
+  </div>
+
+  <section id="inicio" class="section active">
+    <div class="grid" id="metrics"></div>
+    <div class="toolbar"><h2>Órdenes pendientes</h2><button class="btn light" onclick="showTab('ordenes')">Ver todas</button></div>
+    <div class="orders" id="pendingPreview"></div>
+  </section>
+
+  <section id="ordenes" class="section">
+    <div class="toolbar"><div><button class="btn light" onclick="orderFilter='Pendiente';renderOrders()">Pendientes</button> <button class="btn light" onclick="orderFilter='Listo';renderOrders()">Listas</button> <button class="btn light" onclick="orderFilter='Todos';renderOrders()">Todas</button></div><button class="btn primary" onclick="openOrder()">+ Nueva orden</button></div>
+    <div class="orders" id="ordersList"></div>
+  </section>
+
+  <section id="finanzas" class="section">
+    <div class="grid" id="financeMetrics"></div>
+    <div class="toolbar"><h2>Gastos</h2><button class="btn primary" onclick="openExpense()">+ Nuevo gasto</button></div>
+    <div id="expensesList"></div>
+  </section>
+</div>
+
+<div id="orderModal" class="modal"><div class="panel"><h2 id="orderTitle">Nueva orden</h2><div id="orderError" class="error"></div><form id="orderForm" class="form" onsubmit="submitOrder(event)">
+<input type="hidden" name="id"><input type="hidden" name="creadoEn">
+<div><label>Fecha</label><input type="date" name="fecha" required></div><div><label>Origen</label><select name="origen"><option>TikTok</option><option>Printa Crea</option><option>Otro</option></select></div>
+<div><label>Cliente</label><input name="cliente" required></div><div><label>Producto</label><input name="producto" required></div>
+<div><label>Cantidad</label><input type="number" min="1" name="cantidad" value="1"></div><div><label>Fecha para tenerla lista</label><input type="date" name="fechaLimite"></div>
+<div><label>Total de la orden</label><input type="number" step="0.01" min="0" name="total" value="0"></div><div><label>Pagado</label><input type="number" step="0.01" min="0" name="pagado" value="0"></div>
+<div class="full"><label>Especificaciones</label><textarea name="especificaciones"></textarea></div><div class="full"><label>Notas</label><textarea name="notas"></textarea></div>
+<div class="full"><label>Fotos de referencia</label><input type="file" id="refFile" accept="image/*" multiple><input type="hidden" name="fotosReferencia"></div>
+<div><label>Foto del producto</label><input type="file" id="productFile" accept="image/*" capture="environment"><input type="hidden" name="fotoProducto"></div>
+<div><label>Foto de la etiqueta</label><input type="file" id="labelFile" accept="image/*" capture="environment"><input type="hidden" name="fotoEtiqueta"></div>
+<div class="full actions"><button class="btn primary" type="submit">Guardar</button><button class="btn light" type="button" onclick="closeModal('orderModal')">Cancelar</button></div>
+</form></div></div>
+
+<div id="expenseModal" class="modal"><div class="panel"><h2>Nuevo gasto</h2><div id="expenseError" class="error"></div><form id="expenseForm" class="form" onsubmit="submitExpense(event)">
+<div><label>Fecha</label><input type="date" name="fecha" required></div><div><label>Cantidad</label><input type="number" step="0.01" min="0.01" name="cantidad" required></div>
+<div><label>Categoría</label><select name="categoria"><option>Productos</option><option>Materiales</option><option>Tinta</option><option>Papel</option><option>Empaque</option><option>Envíos</option><option>Publicidad</option><option>Suscripciones</option><option>Equipos</option><option>Otro</option></select></div><div><label>Lugar</label><input name="lugar"></div>
+<div class="full"><label>Nota</label><textarea name="nota"></textarea></div><div class="full"><label>Foto del recibo</label><input type="file" id="receiptFile" accept="image/*" capture="environment"><input type="hidden" name="recibo"></div>
+<div class="full actions"><button class="btn primary" type="submit">Guardar gasto</button><button class="btn light" type="button" onclick="closeModal('expenseModal')">Cancelar</button></div>
+</form></div></div>
+
+<script>
+let data={orders:[],expenses:[],summary:{}};let orderFilter='Pendiente';
+const $=s=>document.querySelector(s);const money=v=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Number(v||0));
+function today(){return new Date().toISOString().slice(0,10)}
+function load(){document.body.classList.add('loading');google.script.run.withSuccessHandler(d=>{data=d;render();document.body.classList.remove('loading')}).withFailureHandler(showGlobalError).getAppData()}
+function render(){renderMetrics();renderOrders();renderExpenses();renderPreview()}
+function renderMetrics(){const s=data.summary||{};$('#metrics').innerHTML=[['Pendientes',s.pendientes],['Listas',s.listos],['Ingresos',money(s.ingresos)],['Gastos',money(s.gastos)],['Ganancia',money(s.ganancia)]].map(x=>`<div class="card metric"><small>${x[0]}</small><strong>${x[1]??0}</strong></div>`).join('');$('#financeMetrics').innerHTML=[['Ingresos',money(s.ingresos)],['Gastos',money(s.gastos)],['Ganancia',money(s.ganancia)],['TikTok',money(s.tiktok)],['Printa Crea',money(s.printaCrea)]].map(x=>`<div class="card metric"><small>${x[0]}</small><strong>${x[1]}</strong></div>`).join('')}
+function card(o){return `<div class="card order"><span class="badge ${o.estado==='Listo'?'ready':'pending'}">${o.estado}</span><h3>${escapeHtml(o.id)} · ${escapeHtml(o.origen)}</h3><p><b>${escapeHtml(o.cliente)}</b> — ${escapeHtml(o.producto)} × ${escapeHtml(o.cantidad)}</p><p>Pagado: <b>${money(o.pagado)}</b> · Saldo: <b>${money(o.saldo)}</b></p><p>${escapeHtml(o.especificaciones||'Sin especificaciones')}</p>${links(o)}<div class="actions"><button class="btn good" onclick="toggleStatus('${o.id}','${o.estado==='Listo'?'Pendiente':'Listo'}')">${o.estado==='Listo'?'Regresar a pendiente':'Marcar listo'}</button><button class="btn light" onclick="editOrder('${o.id}')">Editar</button><button class="btn danger" onclick="removeOrder('${o.id}')">Eliminar</button></div></div>`}
+function links(o){let a=[];if(o.fotosReferencia)a.push(`<a href="${o.fotosReferencia.split(',')[0]}" target="_blank">Referencias</a>`);if(o.fotoProducto)a.push(`<a href="${o.fotoProducto}" target="_blank">Producto</a>`);if(o.fotoEtiqueta)a.push(`<a href="${o.fotoEtiqueta}" target="_blank">Etiqueta</a>`);return a.length?`<p>${a.join(' · ')}</p>`:''}
+function renderOrders(){const rows=data.orders.filter(o=>orderFilter==='Todos'||o.estado===orderFilter).reverse();$('#ordersList').innerHTML=rows.length?rows.map(card).join(''):'<div class="card empty">No hay órdenes en esta sección.</div>'}
+function renderPreview(){const rows=data.orders.filter(o=>o.estado==='Pendiente').slice(-4).reverse();$('#pendingPreview').innerHTML=rows.length?rows.map(card).join(''):'<div class="card empty">No hay órdenes pendientes.</div>'}
+function renderExpenses(){const rows=[...data.expenses].reverse();$('#expensesList').innerHTML=rows.length?rows.map(e=>`<div class="card" style="margin-bottom:10px"><b>${escapeHtml(e.categoria)}</b> · ${money(e.cantidad)}<br><small>${escapeHtml(e.fecha)} · ${escapeHtml(e.lugar||'')}</small><p>${escapeHtml(e.nota||'')}</p><div class="actions">${e.recibo?`<a class="btn light" href="${e.recibo}" target="_blank">Ver recibo</a>`:''}<button class="btn danger" onclick="removeExpense('${e.id}')">Eliminar</button></div></div>`).join(''):'<div class="card empty">No hay gastos registrados.</div>'}
+function showTab(id,btn){document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));$('#'+id).classList.add('active');document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));if(btn)btn.classList.add('active')}
+function openOrder(){const f=$('#orderForm');f.reset();f.fecha.value=today();f.cantidad.value=1;f.total.value=0;f.pagado.value=0;$('#orderTitle').textContent='Nueva orden';showModal('orderModal')}
+function editOrder(id){const o=data.orders.find(x=>x.id===id);if(!o)return;openOrder();$('#orderTitle').textContent='Editar orden '+id;Object.keys(o).forEach(k=>{if($('#orderForm')[k])$('#orderForm')[k].value=o[k]||''})}
+function openExpense(){const f=$('#expenseForm');f.reset();f.fecha.value=today();showModal('expenseModal')}
+function showModal(id){$('#'+id).classList.add('show')}function closeModal(id){$('#'+id).classList.remove('show')}
+async function submitOrder(e){e.preventDefault();const f=e.target;hideError('orderError');setBusy(f,true);try{const obj=Object.fromEntries(new FormData(f).entries());obj.fotosReferencia=await uploadMany($('#refFile').files,obj.id||'NUEVA','referencia',obj.fotosReferencia);obj.fotoProducto=await uploadOne($('#productFile').files[0],obj.id||'NUEVA','producto',obj.fotoProducto);obj.fotoEtiqueta=await uploadOne($('#labelFile').files[0],obj.id||'NUEVA','etiqueta',obj.fotoEtiqueta);google.script.run.withSuccessHandler(d=>{data=d;render();closeModal('orderModal');setBusy(f,false)}).withFailureHandler(err=>{showError('orderError',err);setBusy(f,false)}).saveOrder(obj)}catch(err){showError('orderError',err);setBusy(f,false)}}
+async function submitExpense(e){e.preventDefault();const f=e.target;hideError('expenseError');setBusy(f,true);try{const obj=Object.fromEntries(new FormData(f).entries());obj.recibo=await uploadOne($('#receiptFile').files[0],'GASTO','recibo','');google.script.run.withSuccessHandler(d=>{data=d;render();closeModal('expenseModal');setBusy(f,false)}).withFailureHandler(err=>{showError('expenseError',err);setBusy(f,false)}).saveExpense(obj)}catch(err){showError('expenseError',err);setBusy(f,false)}}
+function uploadOne(file,id,cat,old){if(!file)return Promise.resolve(old||'');return readFile(file).then(base64=>new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).uploadFile(base64,file.name,file.type,id,cat)))}
+async function uploadMany(files,id,cat,old){if(!files||!files.length)return old||'';const urls=[];for(const f of files)urls.push(await uploadOne(f,id,cat,''));return urls.join(',')}
+function readFile(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
+function toggleStatus(id,status){google.script.run.withSuccessHandler(d=>{data=d;render()}).withFailureHandler(showGlobalError).setOrderStatus(id,status)}
+function removeOrder(id){if(confirm('¿Eliminar esta orden?'))google.script.run.withSuccessHandler(d=>{data=d;render()}).withFailureHandler(showGlobalError).deleteOrder(id)}
+function removeExpense(id){if(confirm('¿Eliminar este gasto?'))google.script.run.withSuccessHandler(d=>{data=d;render()}).withFailureHandler(showGlobalError).deleteExpense(id)}
+function setBusy(form,b){form.querySelectorAll('button,input,select,textarea').forEach(x=>x.disabled=b)}function showError(id,e){const el=$('#'+id);el.textContent=e.message||e;el.style.display='block'}function hideError(id){$('#'+id).style.display='none'}function showGlobalError(e){document.body.classList.remove('loading');alert(e.message||e)}function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+load();
+</script>
+</body>
+</html>
