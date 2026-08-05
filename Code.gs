@@ -65,22 +65,40 @@ function clientEnhancements_(){return `
   function cacheData(d){try{localStorage.setItem(CACHE_KEY,JSON.stringify({time:Date.now(),data:d}))}catch(e){}}
   function readCache(){try{const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'null');return c&&c.data?c.data:null}catch(e){return null}}
   const baseRender=render;render=function(){baseRender();cacheData(data)};
+
+  busy=function(f,v){
+    f.querySelectorAll('button').forEach(function(b){b.disabled=v});
+  };
+
   window.onload=function(){
     const cached=readCache();
     if(cached){data=cached;const fm=document.querySelector('#financeMonth');if(fm&&!fm.value)fm.value=currentMonth();render();document.body.classList.remove('loading')}
     else document.body.classList.add('loading');
     google.script.run.withSuccessHandler(function(d){data=d;cacheData(d);const fm=document.querySelector('#financeMonth');if(fm&&!fm.value)fm.value=currentMonth();render();document.body.classList.remove('loading')}).withFailureHandler(function(e){document.body.classList.remove('loading');if(!cached)showGlobalError(e)}).getAppData();
   };
+
   document.addEventListener('submit',function(e){
     const f=e.target;if(!['orderForm','expenseForm','productForm'].includes(f.id))return;
     const b=f.querySelector('button[type="submit"],button:not([type])');if(!b)return;
     f.dataset.saveStarted=Date.now();b.dataset.oldText=b.textContent;b.classList.add('saving');
-    setTimeout(function(){if(b.classList.contains('saving')){const modal=f.closest('.modal');if(modal){modal.classList.remove('show');document.body.style.overflow=''}notify('Guardando en segundo plano…')}},550);
   },true);
+
   const baseDone=done;done=function(d,m,f){
     const elapsed=Date.now()-Number(f.dataset.saveStarted||Date.now()),wait=Math.max(0,500-elapsed);
-    setTimeout(function(){cacheData(d);baseDone(d,m,f);const b=f.querySelector('button[type="submit"],button:not([type])');if(b){b.classList.remove('saving');if(b.dataset.oldText)b.textContent=b.dataset.oldText}notify('Guardado')},wait);
+    setTimeout(function(){
+      cacheData(d);
+      baseDone(d,m,f);
+      const b=f.querySelector('button[type="submit"],button:not([type])');
+      if(b){b.classList.remove('saving');if(b.dataset.oldText)b.textContent=b.dataset.oldText}
+      notify('Guardado');
+    },wait);
   };
-  const baseFail=fail;fail=function(id,e,f){const b=f&&f.querySelector('button[type="submit"],button:not([type])');if(b){b.classList.remove('saving');if(b.dataset.oldText)b.textContent=b.dataset.oldText}notify('No se pudo guardar');baseFail(id,e,f)};
+
+  const baseFail=fail;fail=function(id,e,f){
+    const b=f&&f.querySelector('button[type="submit"],button:not([type])');
+    if(b){b.classList.remove('saving');if(b.dataset.oldText)b.textContent=b.dataset.oldText}
+    notify('No se pudo guardar');
+    baseFail(id,e,f);
+  };
 })();
 </script>`}
