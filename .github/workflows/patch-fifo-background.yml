@@ -1,0 +1,117 @@
+name: FIFO inventory and background actions
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-fifo-background.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Code.gs and App.html
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          code_path=Path('Code.gs')
+          code=code_path.read_text(encoding='utf-8')
+          code=code.replace("const APP_CACHE_KEY='PRINTA_APP_DATA_V11';","const APP_CACHE_KEY='PRINTA_APP_DATA_V12';")
+
+          old_calc=re.search(r"function calculateCosts_\(ss,mats,others,paid\)\{.*?\}\nfunction adjustInventory_\(ss,mats,dir\)\{.*?\}\nfunction getSettings_",code,re.S)
+          if not old_calc:
+              raise SystemExit('Cost/inventory functions not found')
+          new_calc=r'''function inventoryBatchRows_(sh,refId){
+  const values=sh.getRange(1,1,Math.max(sh.getLastRow(),1),sh.getLastColumn()).getDisplayValues(),headers=values.shift();
+  const rows=values.map((r,i)=>{const o={_row:i+2};headers.forEach((h,j)=>o[toKey_(h)]=r[j]);return o}).filter(x=>x.id);
+  const source=rows.find(x=>clean_(x.id)===clean_(refId));
+  if(!source)return[];
+  const name=clean_(source.nombre).toLowerCase(),cat=clean_(source.categoria).toLowerCase();
+  return rows.filter(x=>clean_(x.nombre).toLowerCase()===name&&clean_(x.categoria).toLowerCase()===cat).sort((a,b)=>a._row-b._row)
+}
+function fifoCost_(sh,m){
+  let need=number_(m.cantidad,0),total=0;
+  if(Array.isArray(m.lotes)&&m.lotes.length){
+    m.lotes.forEach(l=>{const r=findRowsById_(sh,l.id);if(r.length===1){const x=rowObject_(sh,r[0]);total+=number_(l.cantidad,0)*money_(x.costoUnitario)}});
+    return total
+  }
+  const batches=inventoryBatchRows_(sh,m.id);
+  batches.forEach(x=>{if(need<=0)return;const take=Math.min(need,number_(x.cantidad,0));total+=take*money_(x.costoUnitario);need-=take});
+  if(need>0&&batches.length)total+=need*money_(batches[0].costoUnitario);
+  return total
+}
+function calculateCosts_(ss,mats,others,paid){const sh=ss.getSheetByName(INVENTORY_SHEET);let total=0;mats.forEach(m=>total+=fifoCost_(sh,m));total+=others.reduce((s,x)=>s+money_(x.costo),0);return{total,gain:paid-total}}
+function adjustInventory_(ss,mats,dir){
+  const sh=ss.getSheetByName(INVENTORY_SHEET);
+  mats.forEach(m=>{
+    const qty=number_(m.cantidad,0);if(qty<=0)return;
+    if(dir>0){
+      const lots=Array.isArray(m.lotes)&&m.lotes.length?m.lotes:[{id:m.id,cantidad:qty}];
+      lots.forEach(l=>{const rows=findRowsById_(sh,l.id);if(rows.length!==1)return;const x=rowObject_(sh,rows[0]),next=number_(x.cantidad,0)+number_(l.cantidad,0);sh.getRange(rows[0],4).setValue(next);sh.getRange(rows[0],5).setValue(next*money_(x.costoUnitario));sh.getRange(rows[0],9).setValue(new Date())});
+      return
+    }
+    let need=qty;const lots=[];
+    const batches=inventoryBatchRows_(sh,m.id);
+    const available=batches.reduce((s,x)=>s+number_(x.cantidad,0),0);
+    if(available<need)throw new Error('Inventario insuficiente de '+(batches[0]?batches[0].nombre:'este artículo')+'. Disponible total: '+available);
+    batches.forEach(x=>{if(need<=0)return;const current=number_(x.cantidad,0),take=Math.min(current,need);if(take<=0)return;const next=current-take;sh.getRange(x._row,4).setValue(next);sh.getRange(x._row,5).setValue(next*money_(x.costoUnitario));sh.getRange(x._row,9).setValue(new Date());lots.push({id:x.id,cantidad:take,costoUnitario:money_(x.costoUnitario)});need-=take});
+    m.lotes=lots
+  });
+  return mats
+}
+function getSettings_'''
+          code=code[:old_calc.start()]+new_calc+code[old_calc.end():]
+
+          code=code.replace("if(was){adjustInventory_(ss,parseJson_(old.materialesJson,[]),1);adjustInventory_(ss,mats,-1)}const values=", "if(was){adjustInventory_(ss,parseJson_(old.materialesJson,[]),1);adjustInventory_(ss,mats,-1);cost=calculateCosts_(ss,mats,others,money_(o.pagado))}const values=")
+          code=code.replace("const mats=parseJson_(o.materialesJson,[]),others=parseJson_(o.otrosCostosJson,[]),cost=calculateCosts_", "const mats=parseJson_(o.materialesJson,[]),others=parseJson_(o.otrosCostosJson,[]);let cost=calculateCosts_")
+          code=code.replace("if(status==='Listo'&&!used){adjustInventory_(ss,mats,-1);sh.getRange(r,16).setValue(true)}", "if(status==='Listo'&&!used){adjustInventory_(ss,mats,-1);sh.getRange(r,16).setValue(true);sh.getRange(r,17).setValue(JSON.stringify(mats));const cost=calculateCosts_(ss,mats,parseJson_(o.otrosCostosJson,[]),money_(o.pagado));sh.getRange(r,14,1,2).setValues([[cost.total,cost.gain]])}")
+          code_path.write_text(code,encoding='utf-8')
+
+          app_path=Path('App.html')
+          app=app_path.read_text(encoding='utf-8')
+
+          app=app.replace("function findMainInventory(product){return(data.inventory||[]).find(x=>String(x.categoria).toLowerCase()==='producto'&&String(x.nombre).toLowerCase()===String(product).toLowerCase())||null}","function findMainInventory(product){return(data.inventory||[]).find(x=>String(x.categoria).toLowerCase()==='producto'&&String(x.nombre).toLowerCase()===String(product).toLowerCase())||null}function fifoItemCost(id,qty){const source=(data.inventory||[]).find(x=>x.id===id);if(!source)return 0;let need=num(qty),total=0;(data.inventory||[]).filter(x=>String(x.nombre).toLowerCase()===String(source.nombre).toLowerCase()&&String(x.categoria).toLowerCase()===String(source.categoria).toLowerCase()).forEach(x=>{if(need<=0)return;const take=Math.min(need,num(x.cantidad));total+=take*num(x.costoUnitario);need-=take});if(need>0)total+=need*num(source.costoUnitario);return total}")
+          app=app.replace("money(num(item.costoUnitario)*qty)","money(fifoItemCost(item.id,qty))")
+          app=app.replace("const cost=all.reduce((s,x)=>s+num(map[x.id]?.costoUnitario)*num(x.cantidad),0)","const cost=all.reduce((s,x)=>s+fifoItemCost(x.id,x.cantidad),0)")
+
+          app=app.replace("function changeOrderStatus(id,s,b){const order=data.orders.find(x=>x.id===id),previous=order?order.estado:null;if(order)order.estado=s;setSpin(b,true);renderAll();google.script.run.withSuccessHandler(d=>{data=d;setSpin(b,false);renderAll()}).withFailureHandler(x=>{if(order&&previous)order.estado=previous;setSpin(b,false);renderAll();alert(x.message||x)}).setOrderStatus(id,s)}", "function changeOrderStatus(id,s,b){const order=data.orders.find(x=>x.id===id),previous=order?order.estado:null,start=Date.now();setSpin(b,true);const timer=setTimeout(()=>{if(order)order.estado=s;renderAll()},500);google.script.run.withSuccessHandler(async d=>{clearTimeout(timer);await waitMin(start,500);data=d;renderAll()}).withFailureHandler(async x=>{clearTimeout(timer);await waitMin(start,500);if(order&&previous)order.estado=previous;renderAll();alert(x.message||x)}).setOrderStatus(id,s)}")
+
+          helper="function waitMin(start,ms){return new Promise(r=>setTimeout(r,Math.max(0,ms-(Date.now()-start))))}function spinAction(button,action){const start=Date.now();setSpin(button,true);Promise.resolve().then(action).finally(async()=>{await waitMin(start,500);setSpin(button,false)})}"
+          app=app.replace("function setSpin(b,on){",helper+"function setSpin(b,on){")
+
+          app=app.replace("function removeOrder(id){if(confirm('¿Eliminar esta orden?'))google.script.run.withSuccessHandler(d=>{data=d;renderAll()}).deleteOrder(id)}", "function removeOrder(id,b){if(!confirm('¿Eliminar esta orden?'))return;const backup=JSON.parse(JSON.stringify(data)),start=Date.now();setSpin(b,true);setTimeout(()=>{data.orders=data.orders.filter(x=>x.id!==id);renderAll()},500);google.script.run.withSuccessHandler(d=>{data=d;renderAll()}).withFailureHandler(x=>{data=backup;renderAll();alert(x.message||x)}).deleteOrder(id)}")
+          app=app.replace("onclick=\"removeOrder('${o.id}')\"","onclick=\"removeOrder('${o.id}',this)\"")
+          app=app.replace("onclick=\"editOrder('${o.id}')\"","onclick=\"spinAction(this,()=>editOrder('${o.id}'))\"")
+
+          app=app.replace("function removeExpense(id){if(confirm('¿Eliminar este gasto?'))google.script.run.withSuccessHandler(d=>{data=d;renderAll()}).deleteExpense(id)}", "function removeExpense(id,b){if(!confirm('¿Eliminar este gasto?'))return;const start=Date.now();setSpin(b,true);google.script.run.withSuccessHandler(async d=>{await waitMin(start,500);data=d;renderAll()}).withFailureHandler(async x=>{await waitMin(start,500);setSpin(b,false);alert(x.message||x)}).deleteExpense(id)}")
+          app=app.replace("onclick=\"removeExpense('${e.id}')\"","onclick=\"removeExpense('${e.id}',this)\"")
+          app=app.replace("function removeProduct(id){if(confirm('¿Eliminar este producto?'))google.script.run.withSuccessHandler(d=>{data=d;renderAll()}).deleteProduct(id)}", "function removeProduct(id,b){if(!confirm('¿Eliminar este producto?'))return;const start=Date.now();setSpin(b,true);google.script.run.withSuccessHandler(async d=>{await waitMin(start,500);data=d;renderAll()}).withFailureHandler(async x=>{await waitMin(start,500);setSpin(b,false);alert(x.message||x)}).deleteProduct(id)}")
+          app=app.replace("onclick=\"removeProduct('${p.id}')\"","onclick=\"removeProduct('${p.id}',this)\"")
+          app=app.replace("function removeInventory(id){if(confirm('¿Eliminar este artículo?'))google.script.run.withSuccessHandler(d=>{data=d;renderAll()}).withFailureHandler(x=>alert(x.message||x)).deleteInventoryItem(id)}", "function removeInventory(id,b){if(!confirm('¿Eliminar este artículo?'))return;const start=Date.now();setSpin(b,true);google.script.run.withSuccessHandler(async d=>{await waitMin(start,500);data=d;renderAll()}).withFailureHandler(async x=>{await waitMin(start,500);setSpin(b,false);alert(x.message||x)}).deleteInventoryItem(id)}")
+          app=app.replace("onclick=\"removeInventory('${x.id}')\"","onclick=\"removeInventory('${x.id}',this)\"")
+
+          app=app.replace("function saveInventoryClient(e){e.preventDefault();const f=e.target,o=Object.fromEntries(new FormData(f).entries());", "function saveInventoryClient(e){e.preventDefault();const f=e.target,b=f.querySelector('button[type=submit],button:not([type])'),start=Date.now(),o=Object.fromEntries(new FormData(f).entries());")
+          app=app.replace("busy(f,true);google.script.run.withSuccessHandler(d=>{data=d;busy(f,false);renderAll();closeModal('inventoryModal')}).withFailureHandler(x=>{busy(f,false);showError('inventoryError',x)}).saveInventoryItem(o)", "setSpin(b,true);setTimeout(()=>closeModal('inventoryModal'),500);google.script.run.withSuccessHandler(async d=>{await waitMin(start,500);data=d;renderAll()}).withFailureHandler(async x=>{await waitMin(start,500);setSpin(b,false);showModal('inventoryModal');showError('inventoryError',x)}).saveInventoryItem(o)")
+
+          app=app.replace("async function saveExpenseClient(e){e.preventDefault();const f=e.target,o=", "async function saveExpenseClient(e){e.preventDefault();const f=e.target,b=f.querySelector('button[type=submit],button:not([type])'),start=Date.now(),o=")
+          app=app.replace("busy(f,true);if($('#receiptFile').files[0])", "setSpin(b,true);setTimeout(()=>closeModal('expenseModal'),500);if($('#receiptFile').files[0])")
+          app=app.replace("google.script.run.withSuccessHandler(d=>{data=d;busy(f,false);renderAll();closeModal('expenseModal')}).withFailureHandler(x=>{busy(f,false);showError('expenseError',x)}).saveExpense(o)", "google.script.run.withSuccessHandler(async d=>{await waitMin(start,500);data=d;renderAll()}).withFailureHandler(async x=>{await waitMin(start,500);setSpin(b,false);showModal('expenseModal');showError('expenseError',x)}).saveExpense(o)")
+
+          app=app.replace("async function saveProductClient(e){e.preventDefault();const f=e.target,o=", "async function saveProductClient(e){e.preventDefault();const f=e.target,b=f.querySelector('button[type=submit],button:not([type])'),start=Date.now(),o=")
+          app=app.replace("busy(f,true);if($('#productImage').files[0])", "setSpin(b,true);setTimeout(()=>closeModal('productModal'),500);if($('#productImage').files[0])")
+          app=app.replace("google.script.run.withSuccessHandler(d=>{data=d;busy(f,false);renderAll();closeModal('productModal')}).withFailureHandler(x=>{busy(f,false);showError('productError',x)}).saveProduct(o)", "google.script.run.withSuccessHandler(async d=>{await waitMin(start,500);data=d;renderAll()}).withFailureHandler(async x=>{await waitMin(start,500);setSpin(b,false);showModal('productModal');showError('productError',x)}).saveProduct(o)")
+
+          app_path.write_text(app,encoding='utf-8')
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Code.gs App.html
+          git commit -m 'Agregar FIFO por lotes y acciones en segundo plano'
+          git push
