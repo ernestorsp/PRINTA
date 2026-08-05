@@ -1,0 +1,56 @@
+name: Patch PRINTA profit and status
+
+on:
+  push:
+    paths:
+      - ".github/workflows/patch-profit-status.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch App.html
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('App.html')
+          text = path.read_text(encoding='utf-8')
+
+          old_num = "num=v=>Number(String(v||0).replace(/[^0-9.-]/g,''))||0"
+          new_num = "num=v=>{if(typeof v==='number')return Number.isFinite(v)?v:0;let s=String(v??'').trim().replace(/\\s/g,'').replace(/[$]/g,'');if(!s)return 0;if(s.includes(',')&&s.includes('.')){s=s.lastIndexOf(',')>s.lastIndexOf('.')?s.replace(/\\./g,'').replace(',','.'):s.replace(/,/g,'')}else if(s.includes(','))s=s.replace(',','.');s=s.replace(/[^0-9.-]/g,'');const n=Number(s);return Number.isFinite(n)?n:0}"
+          if old_num not in text:
+              raise SystemExit('num function not found')
+          text = text.replace(old_num, new_num, 1)
+
+          old_card = "function orderCard(o){const g=num(o.ganancia),c=num(o.costoTotal);return`<div class=\"card order ${orderColor(o)}\"><div class=\"top\"><span class=\"badge ${o.estado==='Listo'?'ready':''}\">${esc(o.estado)}</span><span class=\"origin\">${esc(o.origen)}</span></div><h3>${esc(o.cliente)}</h3><p><b>${esc(o.producto)}</b> × ${esc(o.cantidad)}</p><p>Pagado: <b>${money(o.pagado)}</b></p><div class=\"costline\"><span>Costo: <b>${money(c)}</b></span><span class=\"${g>=0?'gain':'loss'}\">${g>=0?'+':''}${money(g)}</span></div><div class=\"deadline\">${shippingLabel(o)}</div>${o.notas?`<p>${esc(o.notas)}</p>`:''}<div class=\"actions\"><button class=\"btn good\" onclick=\"changeOrderStatus('${o.id}','${o.estado==='Listo'?'Pendiente':'Listo'}',this)\">${o.estado==='Listo'?'Regresar a pendiente':'✅ Listo'}</button><button class=\"btn light\" onclick=\"editOrder('${o.id}')\">Editar</button><button class=\"btn danger\" onclick=\"removeOrder('${o.id}')\">Eliminar</button></div></div>`}"
+          new_card = "function orderCard(o){const paid=Math.max(0,num(o.pagado)),c=Math.max(0,num(o.costoTotal)),g=paid-c;return`<div class=\"card order ${orderColor(o)}\"><div class=\"top\"><span class=\"badge ${o.estado==='Listo'?'ready':''}\">${esc(o.estado)}</span><span class=\"origin\">${esc(o.origen)}</span></div><h3>${esc(o.cliente)}</h3><p><b>${esc(o.producto)}</b> × ${esc(o.cantidad)}</p><p>Pagado: <b>${money(paid)}</b></p><div class=\"costline\"><span>Costo: <b>${money(c)}</b></span><span class=\"${g>=0?'gain':'loss'} profit-value\">${g>=0?'+':'−'}${money(Math.abs(g))}</span></div><div class=\"deadline\">${shippingLabel(o)}</div>${o.notas?`<p>${esc(o.notas)}</p>`:''}<div class=\"actions\"><button class=\"btn good\" onclick=\"changeOrderStatus('${o.id}','${o.estado==='Listo'?'Pendiente':'Listo'}',this)\">${o.estado==='Listo'?'Regresar a pendiente':'Listo'}</button><button class=\"btn light\" onclick=\"editOrder('${o.id}')\">Editar</button><button class=\"btn danger\" onclick=\"removeOrder('${o.id}')\">Eliminar</button></div></div>`}"
+          if old_card not in text:
+              raise SystemExit('orderCard not found')
+          text = text.replace(old_card, new_card, 1)
+
+          old_status = "function changeOrderStatus(id,s,b){setSpin(b,true);google.script.run.withSuccessHandler(d=>{data=d;setSpin(b,false);renderAll()}).withFailureHandler(x=>{setSpin(b,false);alert(x.message||x)}).setOrderStatus(id,s)}"
+          new_status = "function changeOrderStatus(id,s,b){const order=data.orders.find(x=>x.id===id),previous=order?order.estado:null;if(order)order.estado=s;setSpin(b,true);renderAll();google.script.run.withSuccessHandler(d=>{data=d;setSpin(b,false);renderAll()}).withFailureHandler(x=>{if(order&&previous)order.estado=previous;setSpin(b,false);renderAll();alert(x.message||x)}).setOrderStatus(id,s)}"
+          if old_status not in text:
+              raise SystemExit('changeOrderStatus not found')
+          text = text.replace(old_status, new_status, 1)
+
+          css = ".profit-value{font-size:15px;white-space:nowrap}.order .costline{align-items:center}.order .gain{color:#15803d!important}.order .loss{color:#dc2626!important}"
+          if css not in text:
+              text = text.replace('</style>', css + '</style>', 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add App.html
+          git commit -m "Corregir ganancia por orden y estado Listo"
+          git push
