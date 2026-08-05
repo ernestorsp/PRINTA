@@ -1,0 +1,55 @@
+name: Fix stuck form spinners
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-stuck-spinner.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix App.html
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p=Path('App.html')
+          s=p.read_text(encoding='utf-8')
+
+          marker="function setSpin(b,on){"
+          helper="function resetButton(b){if(!b)return;const original=b.dataset.originalText||b.dataset.text;if(original)b.innerHTML=original;b.disabled=false;b.classList.remove('saving')}function resetFormButtons(formOrId){const f=typeof formOrId==='string'?document.querySelector(formOrId):formOrId;if(!f)return;f.querySelectorAll('button').forEach(resetButton)}"
+          if helper not in s:
+              s=s.replace(marker,helper+marker,1)
+
+          old="function setSpin(b,on){if(!b)return;if(on){b.dataset.text=b.innerHTML;b.innerHTML='<span class=\"spinner\"></span>';b.disabled=true}else{b.innerHTML=b.dataset.text||'Guardar';b.disabled=false}}"
+          new="function setSpin(b,on){if(!b)return;if(on){if(!b.dataset.originalText)b.dataset.originalText=b.innerHTML;b.dataset.text=b.dataset.originalText;b.innerHTML='<span class=\"spinner\"></span>';b.disabled=true}else{resetButton(b)}}"
+          if old in s:
+              s=s.replace(old,new,1)
+
+          replacements={
+            "function openOrder(){const f=$('#orderForm');f.reset();":"function openOrder(){const f=$('#orderForm');resetFormButtons(f);f.reset();",
+            "function openInventoryModal(){const f=$('#inventoryForm');f.reset();":"function openInventoryModal(){const f=$('#inventoryForm');resetFormButtons(f);f.reset();",
+            "function openExpense(){const f=$('#expenseForm');f.reset();":"function openExpense(){const f=$('#expenseForm');resetFormButtons(f);f.reset();",
+            "function openProduct(){const f=$('#productForm');f.reset();":"function openProduct(){const f=$('#productForm');resetFormButtons(f);f.reset();"
+          }
+          for a,b in replacements.items():
+              if a in s:s=s.replace(a,b,1)
+
+          old_close="function closeModal(id){$('#'+id).classList.remove('show');document.body.style.overflow=''}"
+          new_close="function closeModal(id){const modal=$('#'+id);if(modal){modal.classList.remove('show');resetFormButtons(modal)}document.body.style.overflow=''}"
+          if old_close in s:s=s.replace(old_close,new_close,1)
+
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add App.html
+          git commit -m 'Restaurar botones al abrir y cerrar formularios'
+          git push
