@@ -1,176 +1,24 @@
-const SPREADSHEET_ID = '1eOWiWZh0zTnVLnv53bTDXvlFJJG5ZbvR6Upr7_9uLb8';
-const ORDERS_SHEET = 'ORDENES';
-const EXPENSES_SHEET = 'GASTOS';
-const CONFIG_SHEET = 'CONFIGURACION';
-
-function doGet() {
-  return HtmlService.createTemplateFromFile('Index')
-    .evaluate()
-    .setTitle('PRINTA')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-
-function getAppData() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const orders = readRows_(ss.getSheetByName(ORDERS_SHEET));
-  const expenses = readRows_(ss.getSheetByName(EXPENSES_SHEET));
-  return { orders, expenses, summary: buildSummary_(orders, expenses) };
-}
-
-function saveOrder(order) {
-  validateOrder_(order);
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(ORDERS_SHEET);
-  const now = new Date();
-  const id = order.id || nextId_(sheet, 'PC');
-  const row = [
-    id,
-    order.fecha || formatDate_(now),
-    order.estado || 'Pendiente',
-    order.origen || 'Otro',
-    clean_(order.cliente),
-    clean_(order.producto),
-    number_(order.cantidad, 1),
-    clean_(order.especificaciones),
-    money_(order.total),
-    money_(order.pagado),
-    Math.max(0, money_(order.total) - money_(order.pagado)),
-    order.fechaLimite || '',
-    clean_(order.notas),
-    clean_(order.fotosReferencia),
-    clean_(order.fotoProducto),
-    clean_(order.fotoEtiqueta),
-    order.creadoEn || now,
-    now
-  ];
-  upsertById_(sheet, id, row);
-  return getAppData();
-}
-
-function setOrderStatus(id, status) {
-  if (!['Pendiente', 'Listo'].includes(status)) throw new Error('Estado inválido.');
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(ORDERS_SHEET);
-  const row = findRowById_(sheet, id);
-  if (!row) throw new Error('Orden no encontrada.');
-  sheet.getRange(row, 3).setValue(status);
-  sheet.getRange(row, 18).setValue(new Date());
-  return getAppData();
-}
-
-function deleteOrder(id) {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(ORDERS_SHEET);
-  const row = findRowById_(sheet, id);
-  if (row) sheet.deleteRow(row);
-  return getAppData();
-}
-
-function saveExpense(expense) {
-  if (!expense || money_(expense.cantidad) <= 0) throw new Error('Escribe una cantidad válida.');
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(EXPENSES_SHEET);
-  const now = new Date();
-  const id = expense.id || nextId_(sheet, 'GA');
-  const row = [
-    id,
-    expense.fecha || formatDate_(now),
-    expense.categoria || 'Otro',
-    clean_(expense.lugar),
-    money_(expense.cantidad),
-    clean_(expense.nota),
-    clean_(expense.recibo),
-    expense.creadoEn || now
-  ];
-  upsertById_(sheet, id, row);
-  return getAppData();
-}
-
-function deleteExpense(id) {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(EXPENSES_SHEET);
-  const row = findRowById_(sheet, id);
-  if (row) sheet.deleteRow(row);
-  return getAppData();
-}
-
-function uploadFile(fileData, fileName, mimeType, orderId, category) {
-  if (!fileData) return '';
-  const folder = getUploadsFolder_();
-  const bytes = Utilities.base64Decode(String(fileData).split(',').pop());
-  const safeName = `${orderId || 'GENERAL'}_${category || 'archivo'}_${Date.now()}_${fileName || 'archivo'}`;
-  const file = folder.createFile(Utilities.newBlob(bytes, mimeType || 'application/octet-stream', safeName));
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  return file.getUrl();
-}
-
-function getUploadsFolder_() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const config = ss.getSheetByName(CONFIG_SHEET);
-  const values = config.getRange(1, 1, Math.max(config.getLastRow(), 1), 2).getValues();
-  let folderId = '';
-  let configRow = 0;
-  values.forEach((r, i) => {
-    if (r[0] === 'CARPETA_FOTOS_ID') { folderId = r[1]; configRow = i + 1; }
-  });
-  if (folderId) {
-    try { return DriveApp.getFolderById(folderId); } catch (e) {}
-  }
-  const folder = DriveApp.createFolder('PRINTA - Fotos y recibos');
-  if (configRow) config.getRange(configRow, 2).setValue(folder.getId());
-  return folder;
-}
-
-function readRows_(sheet) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  const values = sheet.getRange(1, 1, lastRow, sheet.getLastColumn()).getDisplayValues();
-  const headers = values.shift();
-  return values.filter(r => r[0]).map(r => {
-    const obj = {};
-    headers.forEach((h, i) => obj[toKey_(h)] = r[i]);
-    return obj;
-  });
-}
-
-function buildSummary_(orders, expenses) {
-  const month = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM');
-  const monthOrders = orders.filter(o => String(o.fecha || '').startsWith(month));
-  const monthExpenses = expenses.filter(e => String(e.fecha || '').startsWith(month));
-  const ingresos = monthOrders.reduce((s, o) => s + money_(o.pagado), 0);
-  const gastos = monthExpenses.reduce((s, e) => s + money_(e.cantidad), 0);
-  return {
-    pendientes: orders.filter(o => o.estado === 'Pendiente').length,
-    listos: orders.filter(o => o.estado === 'Listo').length,
-    ingresos,
-    gastos,
-    ganancia: ingresos - gastos,
-    tiktok: monthOrders.filter(o => o.origen === 'TikTok').reduce((s, o) => s + money_(o.pagado), 0),
-    printaCrea: monthOrders.filter(o => o.origen === 'Printa Crea').reduce((s, o) => s + money_(o.pagado), 0)
-  };
-}
-
-function upsertById_(sheet, id, row) {
-  const existing = findRowById_(sheet, id);
-  if (existing) sheet.getRange(existing, 1, 1, row.length).setValues([row]);
-  else sheet.appendRow(row);
-}
-
-function findRowById_(sheet, id) {
-  if (sheet.getLastRow() < 2) return 0;
-  const match = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).createTextFinder(String(id)).matchEntireCell(true).findNext();
-  return match ? match.getRow() : 0;
-}
-
-function nextId_(sheet, prefix) {
-  const n = Math.max(1, sheet.getLastRow());
-  return `${prefix}-${String(n).padStart(4, '0')}`;
-}
-
-function validateOrder_(o) {
-  if (!o) throw new Error('Faltan datos de la orden.');
-  if (!clean_(o.cliente)) throw new Error('Escribe el nombre del cliente.');
-  if (!clean_(o.producto)) throw new Error('Escribe el producto.');
-  if (money_(o.pagado) > money_(o.total)) throw new Error('Lo pagado no puede ser mayor que el total.');
-}
-
-function formatDate_(d) { return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd'); }
-function money_(v) { const n = Number(String(v || 0).replace(/[^0-9.-]/g, '')); return isNaN(n) ? 0 : n; }
-function number_(v, fallback) { const n = Number(v); return isNaN(n) ? fallback : n; }
-function clean_(v) { return String(v == null ? '' : v).trim(); }
-function toKey_(h) { return String(h).toLowerCase().replace(/_([a-z])/g, (_, c) => c.toUpperCase()); }
+const SPREADSHEET_ID='1eOWiWZh0zTnVLnv53bTDXvlFJJG5ZbvR6Upr7_9uLb8';
+const ORDERS_SHEET='ORDENES',EXPENSES_SHEET='GASTOS',PRODUCTS_SHEET='PRODUCTOS',CONFIG_SHEET='CONFIGURACION';
+function doGet(){return HtmlService.createTemplateFromFile('Index').evaluate().setTitle('PRINTA').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)}
+function getAppData(){const ss=SpreadsheetApp.openById(SPREADSHEET_ID);const orders=readRows_(ss.getSheetByName(ORDERS_SHEET));const expenses=readRows_(ss.getSheetByName(EXPENSES_SHEET));const products=readRows_(ss.getSheetByName(PRODUCTS_SHEET));return{orders,expenses,products,summary:buildSummary_(orders,expenses)}}
+function saveOrder(o){if(!o||!clean_(o.cliente)||!clean_(o.producto))throw new Error('Completa cliente y producto.');const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(ORDERS_SHEET),now=new Date(),id=o.id||nextId_(sh,'PC');const row=[id,o.fecha||formatDate_(now),o.estado||'Pendiente',o.origen||'Otro',clean_(o.cliente),clean_(o.producto),number_(o.cantidad,1),clean_(o.notas),money_(o.pagado),o.fechaEnvio||'',clean_(o.foto),o.creadoEn||now,now];upsertById_(sh,id,row);return getAppData()}
+function setOrderStatus(id,status){if(!['Pendiente','Listo'].includes(status))throw new Error('Estado inválido.');const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(ORDERS_SHEET),r=findRowById_(sh,id);if(!r)throw new Error('Orden no encontrada.');sh.getRange(r,3).setValue(status);sh.getRange(r,13).setValue(new Date());return getAppData()}
+function deleteOrder(id){deleteById_(ORDERS_SHEET,id);return getAppData()}
+function saveExpense(e){if(!e||money_(e.cantidad)<=0)throw new Error('Escribe una cantidad válida.');const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(EXPENSES_SHEET),now=new Date(),id=e.id||nextId_(sh,'GA');upsertById_(sh,id,[id,e.fecha||formatDate_(now),e.categoria||'Otro',clean_(e.lugar),money_(e.cantidad),clean_(e.nota),clean_(e.recibo),e.creadoEn||now]);return getAppData()}
+function deleteExpense(id){deleteById_(EXPENSES_SHEET,id);return getAppData()}
+function saveProduct(p){if(!p||!clean_(p.nombre))throw new Error('Escribe el nombre del producto.');const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(PRODUCTS_SHEET),now=new Date(),id=p.id||nextId_(sh,'PR');upsertById_(sh,id,[id,clean_(p.nombre),clean_(p.foto),String(p.disponible)!=='false',p.creadoEn||now,now]);return getAppData()}
+function deleteProduct(id){deleteById_(PRODUCTS_SHEET,id);return getAppData()}
+function uploadFile(fileData,fileName,mimeType,ownerId,category){if(!fileData)return'';const folder=getUploadsFolder_(),bytes=Utilities.base64Decode(String(fileData).split(',').pop()),safe=`${ownerId||'GENERAL'}_${category||'archivo'}_${Date.now()}_${fileName||'archivo'}`,file=folder.createFile(Utilities.newBlob(bytes,mimeType||'application/octet-stream',safe));file.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);return file.getUrl()}
+function getUploadsFolder_(){const ss=SpreadsheetApp.openById(SPREADSHEET_ID),c=ss.getSheetByName(CONFIG_SHEET),v=c.getRange(1,1,Math.max(c.getLastRow(),1),2).getValues();let id='',row=0;v.forEach((x,i)=>{if(x[0]==='CARPETA_FOTOS_ID'){id=x[1];row=i+1}});if(id){try{return DriveApp.getFolderById(id)}catch(e){}}const f=DriveApp.createFolder('PRINTA - Fotos y recibos');if(row)c.getRange(row,2).setValue(f.getId());return f}
+function readRows_(sh){if(!sh||sh.getLastRow()<2)return[];const vals=sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getDisplayValues(),h=vals.shift();return vals.filter(r=>r[0]).map(r=>{const o={};h.forEach((x,i)=>o[toKey_(x)]=r[i]);return o})}
+function buildSummary_(o,e){const m=Utilities.formatDate(new Date(),Session.getScriptTimeZone(),'yyyy-MM'),mo=o.filter(x=>String(x.fecha||'').startsWith(m)),me=e.filter(x=>String(x.fecha||'').startsWith(m)),ing=mo.reduce((s,x)=>s+money_(x.pagado),0),gas=me.reduce((s,x)=>s+money_(x.cantidad),0);return{pendientes:o.filter(x=>x.estado==='Pendiente').length,listos:o.filter(x=>x.estado==='Listo').length,ingresos:ing,gastos:gas,ganancia:ing-gas,tiktok:mo.filter(x=>x.origen==='TikTok').reduce((s,x)=>s+money_(x.pagado),0),printaCrea:mo.filter(x=>x.origen==='Printa Crea').reduce((s,x)=>s+money_(x.pagado),0)}}
+function upsertById_(sh,id,row){const r=findRowById_(sh,id);r?sh.getRange(r,1,1,row.length).setValues([row]):sh.appendRow(row)}
+function deleteById_(name,id){const sh=SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(name),r=findRowById_(sh,id);if(r)sh.deleteRow(r)}
+function findRowById_(sh,id){if(sh.getLastRow()<2)return 0;const m=sh.getRange(2,1,sh.getLastRow()-1,1).createTextFinder(String(id)).matchEntireCell(true).findNext();return m?m.getRow():0}
+function nextId_(sh,p){return`${p}-${String(Math.max(1,sh.getLastRow())).padStart(4,'0')}`}
+function formatDate_(d){return Utilities.formatDate(d,Session.getScriptTimeZone(),'yyyy-MM-dd')}
+function money_(v){const n=Number(String(v||0).replace(/[^0-9.-]/g,''));return isNaN(n)?0:n}
+function number_(v,f){const n=Number(v);return isNaN(n)?f:n}
+function clean_(v){return String(v==null?'':v).trim()}
+function toKey_(h){return String(h).toLowerCase().replace(/_([a-z])/g,(_,c)=>c.toUpperCase())}
