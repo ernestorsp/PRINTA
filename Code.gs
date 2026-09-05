@@ -5,7 +5,8 @@ const CONFIG = {
   IMAGE_FOLDER_NAME: 'PRINTA_ORDENES_IMAGES',
   TIME_ZONE: 'America/New_York',
   ORIGIN_DAYS: { TikTok: 2, Shopify: 3, Zelle: 3 },
-  HEADERS: ['ID','Nombre','Numero Orden','Origen','Fecha Orden','Dias Habiles','Fecha Limite','Producto','Estado','Indicaciones','Imagenes','Creada','Actualizada','Fecha Envio']
+  HEADERS: ['ID','Nombre','Numero Orden','Origen','Fecha Orden','Dias Habiles','Fecha Limite','Producto','Estado','Indicaciones','Imagenes','Creada','Actualizada','Fecha Envio'],
+  PRODUCT_HEADERS: ['Producto','Variante','Label','Product GID','Variant GID','SKU','Status']
 };
 
 function doGet() {
@@ -19,7 +20,8 @@ function getAppData() {
   const sh = getSheet_();
   const lastRow = sh.getLastRow();
   const products = getActiveProducts_();
-  if (lastRow < 2) return { orders: [], products, today: today_(), originDays: CONFIG.ORIGIN_DAYS };
+  const syncInfo = getShopifySyncInfo_();
+  if (lastRow < 2) return { orders: [], products, syncInfo, today: today_(), originDays: CONFIG.ORIGIN_DAYS };
 
   const values = sh.getRange(2, 1, lastRow - 1, CONFIG.HEADERS.length).getValues();
   const orders = values
@@ -31,13 +33,12 @@ function getAppData() {
       return da.localeCompare(db) || (b.createdAt || '').localeCompare(a.createdAt || '');
     });
 
-  return { orders, products, today: today_(), originDays: CONFIG.ORIGIN_DAYS };
+  return { orders, products, syncInfo, today: today_(), originDays: CONFIG.ORIGIN_DAYS };
 }
 
 function getActiveProducts_() {
-  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const sh = ss.getSheetByName(CONFIG.PRODUCT_SHEET_NAME);
-  if (!sh || sh.getLastRow() < 2) return [];
+  const sh = getProductSheet_();
+  if (sh.getLastRow() < 2) return [];
   const rows = sh.getRange(2, 1, sh.getLastRow() - 1, 7).getValues();
   return rows
     .filter(r => String(r[6] || '').toUpperCase() === 'ACTIVE' && String(r[2] || '').trim())
@@ -50,6 +51,116 @@ function getActiveProducts_() {
       sku: String(r[5] || '')
     }))
     .sort((a,b) => a.label.localeCompare(b.label, 'es', {sensitivity:'base'}));
+}
+
+function syncShopifyProducts() {
+  const props = PropertiesService.getScriptProperties();
+  const shop = normalizeShopDomain_(props.getProperty('SHOPIFY_SHOP_DOMAIN'));
+  const token = String(props.getProperty('SHOPIFY_ADMIN_TOKEN') || '').trim();
+  if (!shop || !token) {
+    throw new Error('Para sincronizar falta configurar SHOPIFY_SHOP_DOMAIN y SHOPIFY_ADMIN_TOKEN en Propiedades del script de Apps Script.');
+  }
+
+  const apiVersion = String(props.getProperty('SHOPIFY_API_VERSION') || '2026-07').trim();
+  const endpoint = 'https://' + shop + '/admin/api/' + apiVersion + '/graphql.json';
+  const allRows = [];
+  let cursor = null;
+  let hasNext = true;
+
+  while (hasNext) {
+    const query = `query ActiveProducts($after: String) {
+      products(first: 100, after: $after, query: "status:active", sortKey: TITLE) {
+        edges {
+          cursor
+          node {
+            id
+            title
+            status
+            variants(first: 100) {
+              nodes { id title sku }
+            }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }`;
+
+    const response = UrlFetchApp.fetch(endpoint, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'X-Shopify-Access-Token': token },
+      payload: JSON.stringify({ query, variables: { after: cursor } }),
+      muteHttpExceptions: true
+    });
+
+    const code = response.getResponseCode();
+    let body;
+    try { body = JSON.parse(response.getContentText() || '{}'); } catch (e) { body = {}; }
+    if (code < 200 || code >= 300) throw new Error('Shopify respondió ' + code + '. Revisa el dominio y el token de Admin API.');
+    if (body.errors && body.errors.length) throw new Error('Shopify: ' + body.errors.map(e => e.message).join(' · '));
+
+    const products = body && body.data && body.data.products;
+    if (!products) throw new Error('Shopify no devolvió la lista de productos.');
+
+    products.edges.forEach(edge => {
+      const p = edge.node;
+      if (String(p.status || '').toUpperCase() !== 'ACTIVE') return;
+      const variants = p.variants && p.variants.nodes ? p.variants.nodes : [];
+      if (!variants.length) {
+        allRows.push([p.title, '', p.title, p.id, '', '', 'ACTIVE']);
+        return;
+      }
+      variants.forEach(v => {
+        const variantTitle = String(v.title || '').trim();
+        const isDefault = !variantTitle || variantTitle.toLowerCase() === 'default title';
+        const label = isDefault ? p.title : p.title + ' — ' + variantTitle;
+        allRows.push([p.title, isDefault ? '' : variantTitle, label, p.id, v.id || '', v.sku || '', 'ACTIVE']);
+      });
+    });
+
+    hasNext = !!products.pageInfo.hasNextPage;
+    cursor = products.pageInfo.endCursor || null;
+  }
+
+  allRows.sort((a,b) => String(a[2]).localeCompare(String(b[2]), 'es', {sensitivity:'base'}));
+  const sh = getProductSheet_();
+  const rowsToClear = Math.max(sh.getLastRow() - 1, 0);
+  if (rowsToClear) sh.getRange(2, 1, rowsToClear, 7).clearContent();
+  if (allRows.length) sh.getRange(2, 1, allRows.length, 7).setValues(allRows);
+  sh.autoResizeColumns(1, 7);
+
+  const syncedAt = formatDateTime_(new Date());
+  props.setProperty('SHOPIFY_LAST_SYNC', syncedAt);
+  props.setProperty('SHOPIFY_LAST_SYNC_COUNT', String(allRows.length));
+  return { ok: true, count: allRows.length, syncedAt, products: getActiveProducts_() };
+}
+
+function getShopifySyncInfo_() {
+  const props = PropertiesService.getScriptProperties();
+  return {
+    configured: !!(props.getProperty('SHOPIFY_SHOP_DOMAIN') && props.getProperty('SHOPIFY_ADMIN_TOKEN')),
+    lastSync: props.getProperty('SHOPIFY_LAST_SYNC') || '',
+    lastCount: Number(props.getProperty('SHOPIFY_LAST_SYNC_COUNT') || 0)
+  };
+}
+
+function normalizeShopDomain_(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/g, '');
+}
+
+function getProductSheet_() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  let sh = ss.getSheetByName(CONFIG.PRODUCT_SHEET_NAME);
+  if (!sh) sh = ss.insertSheet(CONFIG.PRODUCT_SHEET_NAME);
+  const current = sh.getRange(1, 1, 1, CONFIG.PRODUCT_HEADERS.length).getValues()[0];
+  if (current.join('|') !== CONFIG.PRODUCT_HEADERS.join('|')) {
+    sh.getRange(1, 1, 1, CONFIG.PRODUCT_HEADERS.length).setValues([CONFIG.PRODUCT_HEADERS]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
 }
 
 function saveOrder(payload) {
