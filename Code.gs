@@ -53,16 +53,6 @@ function getActiveProducts_() {
     .sort((a,b) => a.label.localeCompare(b.label, 'es', {sensitivity:'base'}));
 }
 
-/**
- * Sincroniza SOLO productos ACTIVE de Shopify.
- * Usa el flujo oficial Client Credentials de las apps creadas en Dev Dashboard.
- * Propiedades requeridas en Apps Script:
- *   SHOPIFY_SHOP            -> subdominio myshopify, por ejemplo: i-e-gift
- *   SHOPIFY_CLIENT_ID       -> ID de cliente de Dev Dashboard
- *   SHOPIFY_CLIENT_SECRET   -> Secreto de Dev Dashboard
- * Opcional:
- *   SHOPIFY_API_VERSION     -> por defecto 2026-07
- */
 function syncShopifyProducts() {
   const props = PropertiesService.getScriptProperties();
   const shop = normalizeShopSubdomain_(props.getProperty('SHOPIFY_SHOP'));
@@ -109,11 +99,7 @@ function syncShopifyProducts() {
     const code = response.getResponseCode();
     let body;
     try { body = JSON.parse(response.getContentText() || '{}'); } catch (e) { body = {}; }
-
-    if (code < 200 || code >= 300) {
-      const detail = body && body.errors ? JSON.stringify(body.errors) : response.getContentText();
-      throw new Error('Shopify respondió ' + code + '. ' + String(detail || '').slice(0, 300));
-    }
+    if (code < 200 || code >= 300) throw new Error('Shopify respondió ' + code + '. Revisa la instalación de la app y sus permisos.');
     if (body.errors && body.errors.length) throw new Error('Shopify: ' + body.errors.map(e => e.message).join(' · '));
 
     const products = body && body.data && body.data.products;
@@ -154,7 +140,7 @@ function syncShopifyProducts() {
 
 function getShopifyAccessToken_(shop, clientId, clientSecret) {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'SHOPIFY_CC_TOKEN_' + shop;
+  const cacheKey = 'SHOPIFY_ACCESS_TOKEN_' + shop;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
@@ -173,15 +159,12 @@ function getShopifyAccessToken_(shop, clientId, clientSecret) {
   const code = response.getResponseCode();
   let body;
   try { body = JSON.parse(response.getContentText() || '{}'); } catch (e) { body = {}; }
-
   if (code < 200 || code >= 300 || !body.access_token) {
-    const msg = body.error_description || body.error || response.getContentText() || 'No se pudo obtener el token.';
-    throw new Error('No se pudo autenticar con Shopify (' + code + '): ' + String(msg).slice(0, 300));
+    const detail = body.error_description || body.error || response.getContentText() || 'No se pudo obtener el token.';
+    throw new Error('No se pudo autenticar con Shopify (' + code + '): ' + detail);
   }
 
-  const expiresIn = Math.max(60, Number(body.expires_in || 86399));
-  // Apps Script Cache permite hasta 21600 segundos (6 h). Renovamos automáticamente al expirar el cache.
-  cache.put(cacheKey, String(body.access_token), Math.min(21600, Math.max(60, expiresIn - 300)));
+  cache.put(cacheKey, String(body.access_token), 21000);
   return String(body.access_token);
 }
 
@@ -195,13 +178,11 @@ function getShopifySyncInfo_() {
 }
 
 function normalizeShopSubdomain_(value) {
-  let s = String(value || '').trim().toLowerCase();
-  s = s.replace(/^https?:\/\//i, '').replace(/\/+$/g, '');
-  s = s.replace(/\.myshopify\.com$/i, '');
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(s)) {
-    throw new Error('SHOPIFY_SHOP debe ser el subdominio myshopify, por ejemplo: i-e-gift');
-  }
-  return s;
+  return String(value || '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\.myshopify\.com.*$/i, '')
+    .replace(/\/+$/g, '');
 }
 
 function getProductSheet_() {
@@ -229,23 +210,7 @@ function saveOrder(payload) {
   const id = Utilities.getUuid();
   const imageUrls = saveImages_(payload.images || [], id, String(payload.name || '').trim());
 
-  const row = [
-    id,
-    String(payload.name || '').trim(),
-    String(payload.orderNumber || '').trim(),
-    payload.origin,
-    orderDate,
-    businessDays,
-    dueDate,
-    String(payload.product || '').trim(),
-    'Pendiente',
-    String(payload.instructions || '').trim(),
-    JSON.stringify(imageUrls),
-    formatDateTime_(now),
-    formatDateTime_(now),
-    ''
-  ];
-
+  const row = [id,String(payload.name || '').trim(),String(payload.orderNumber || '').trim(),payload.origin,orderDate,businessDays,dueDate,String(payload.product || '').trim(),'Pendiente',String(payload.instructions || '').trim(),JSON.stringify(imageUrls),formatDateTime_(now),formatDateTime_(now),''];
   sh.appendRow(row);
   formatRowDates_(sh, sh.getLastRow());
   return { ok: true, order: rowToOrder_(row) };
@@ -254,11 +219,9 @@ function saveOrder(payload) {
 function updateOrderStatus(id, status) {
   const allowed = ['Pendiente', 'Lista para envio', 'Enviada'];
   if (!allowed.includes(status)) throw new Error('Estado no válido.');
-
   const sh = getSheet_();
   const row = findRowById_(sh, id);
   if (!row) throw new Error('No se encontró la orden.');
-
   sh.getRange(row, 9).setValue(status);
   sh.getRange(row, 13).setValue(formatDateTime_(new Date()));
   sh.getRange(row, 14).setValue(status === 'Enviada' ? formatDateTime_(new Date()) : '');
@@ -277,7 +240,6 @@ function getSheet_() {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   let sh = ss.getSheetByName(CONFIG.SHEET_NAME);
   if (!sh) sh = ss.insertSheet(CONFIG.SHEET_NAME);
-
   const current = sh.getRange(1, 1, 1, CONFIG.HEADERS.length).getValues()[0];
   if (current.join('|') !== CONFIG.HEADERS.join('|')) {
     sh.getRange(1, 1, 1, CONFIG.HEADERS.length).setValues([CONFIG.HEADERS]);
@@ -297,23 +259,7 @@ function rowToOrder_(r) {
   const dueDate = dateCellToYmd_(r[6]);
   let images = [];
   try { images = Array.isArray(r[10]) ? r[10] : JSON.parse(r[10] || '[]'); } catch (e) { images = String(r[10] || '').split(',').map(s => s.trim()).filter(Boolean); }
-
-  return {
-    id: String(r[0] || ''),
-    name: String(r[1] || ''),
-    orderNumber: String(r[2] || ''),
-    origin: String(r[3] || ''),
-    orderDate,
-    businessDays: Number(r[5] || 0),
-    dueDate,
-    product: String(r[7] || ''),
-    status: String(r[8] || 'Pendiente'),
-    instructions: String(r[9] || ''),
-    images,
-    createdAt: dateTimeCellToString_(r[11]),
-    updatedAt: dateTimeCellToString_(r[12]),
-    shippedAt: dateTimeCellToString_(r[13])
-  };
+  return {id:String(r[0]||''),name:String(r[1]||''),orderNumber:String(r[2]||''),origin:String(r[3]||''),orderDate,businessDays:Number(r[5]||0),dueDate,product:String(r[7]||''),status:String(r[8]||'Pendiente'),instructions:String(r[9]||''),images,createdAt:dateTimeCellToString_(r[11]),updatedAt:dateTimeCellToString_(r[12]),shippedAt:dateTimeCellToString_(r[13])};
 }
 
 function saveImages_(images, orderId, customerName) {
@@ -337,9 +283,7 @@ function saveImages_(images, orderId, customerName) {
 function getImageFolder_() {
   const props = PropertiesService.getScriptProperties();
   const savedId = props.getProperty('ORDENES_IMAGE_FOLDER_ID');
-  if (savedId) {
-    try { return DriveApp.getFolderById(savedId); } catch (e) {}
-  }
+  if (savedId) { try { return DriveApp.getFolderById(savedId); } catch (e) {} }
   const it = DriveApp.getFoldersByName(CONFIG.IMAGE_FOLDER_NAME);
   const folder = it.hasNext() ? it.next() : DriveApp.createFolder(CONFIG.IMAGE_FOLDER_NAME);
   props.setProperty('ORDENES_IMAGE_FOLDER_ID', folder.getId());
@@ -350,37 +294,13 @@ function addBusinessDays_(ymd, days) {
   const parts = ymd.split('-').map(Number);
   let d = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
   let added = 0;
-  while (added < days) {
-    d.setDate(d.getDate() + 1);
-    const day = d.getDay();
-    if (day !== 0 && day !== 6) added++;
-  }
+  while (added < days) { d.setDate(d.getDate() + 1); const day = d.getDay(); if (day !== 0 && day !== 6) added++; }
   return Utilities.formatDate(d, CONFIG.TIME_ZONE, 'yyyy-MM-dd');
 }
 
-function normalizeDate_(value) {
-  const s = String(value || '').trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
-}
-
+function normalizeDate_(value) { const s = String(value || '').trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''; }
 function today_() { return Utilities.formatDate(new Date(), CONFIG.TIME_ZONE, 'yyyy-MM-dd'); }
 function formatDateTime_(d) { return Utilities.formatDate(d, CONFIG.TIME_ZONE, 'yyyy-MM-dd HH:mm:ss'); }
-
-function dateCellToYmd_(v) {
-  if (v instanceof Date) return Utilities.formatDate(v, CONFIG.TIME_ZONE, 'yyyy-MM-dd');
-  const s = String(v || '').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const d = new Date(s);
-  return isNaN(d) ? '' : Utilities.formatDate(d, CONFIG.TIME_ZONE, 'yyyy-MM-dd');
-}
-
-function dateTimeCellToString_(v) {
-  if (!v) return '';
-  if (v instanceof Date) return Utilities.formatDate(v, CONFIG.TIME_ZONE, 'yyyy-MM-dd HH:mm:ss');
-  return String(v);
-}
-
-function formatRowDates_(sh, row) {
-  sh.getRange(row, 5).setNumberFormat('yyyy-mm-dd');
-  sh.getRange(row, 7).setNumberFormat('yyyy-mm-dd');
-}
+function dateCellToYmd_(v) { if (v instanceof Date) return Utilities.formatDate(v, CONFIG.TIME_ZONE, 'yyyy-MM-dd'); const s=String(v||'').trim(); if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; const d=new Date(s); return isNaN(d)?'':Utilities.formatDate(d,CONFIG.TIME_ZONE,'yyyy-MM-dd'); }
+function dateTimeCellToString_(v) { if (!v) return ''; if (v instanceof Date) return Utilities.formatDate(v, CONFIG.TIME_ZONE, 'yyyy-MM-dd HH:mm:ss'); return String(v); }
+function formatRowDates_(sh, row) { sh.getRange(row, 5).setNumberFormat('yyyy-mm-dd'); sh.getRange(row, 7).setNumberFormat('yyyy-mm-dd'); }
