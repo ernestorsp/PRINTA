@@ -53,16 +53,29 @@ function getActiveProducts_() {
     .sort((a,b) => a.label.localeCompare(b.label, 'es', {sensitivity:'base'}));
 }
 
+/**
+ * Sincroniza SOLO productos ACTIVE de Shopify.
+ * Usa el flujo oficial Client Credentials de las apps creadas en Dev Dashboard.
+ * Propiedades requeridas en Apps Script:
+ *   SHOPIFY_SHOP            -> subdominio myshopify, por ejemplo: i-e-gift
+ *   SHOPIFY_CLIENT_ID       -> ID de cliente de Dev Dashboard
+ *   SHOPIFY_CLIENT_SECRET   -> Secreto de Dev Dashboard
+ * Opcional:
+ *   SHOPIFY_API_VERSION     -> por defecto 2026-07
+ */
 function syncShopifyProducts() {
   const props = PropertiesService.getScriptProperties();
-  const shop = normalizeShopDomain_(props.getProperty('SHOPIFY_SHOP_DOMAIN'));
-  const token = String(props.getProperty('SHOPIFY_ADMIN_TOKEN') || '').trim();
-  if (!shop || !token) {
-    throw new Error('Para sincronizar falta configurar SHOPIFY_SHOP_DOMAIN y SHOPIFY_ADMIN_TOKEN en Propiedades del script de Apps Script.');
+  const shop = normalizeShopSubdomain_(props.getProperty('SHOPIFY_SHOP'));
+  const clientId = String(props.getProperty('SHOPIFY_CLIENT_ID') || '').trim();
+  const clientSecret = String(props.getProperty('SHOPIFY_CLIENT_SECRET') || '').trim();
+
+  if (!shop || !clientId || !clientSecret) {
+    throw new Error('Falta configurar SHOPIFY_SHOP, SHOPIFY_CLIENT_ID y SHOPIFY_CLIENT_SECRET en Propiedades del script.');
   }
 
+  const token = getShopifyAccessToken_(shop, clientId, clientSecret);
   const apiVersion = String(props.getProperty('SHOPIFY_API_VERSION') || '2026-07').trim();
-  const endpoint = 'https://' + shop + '/admin/api/' + apiVersion + '/graphql.json';
+  const endpoint = 'https://' + shop + '.myshopify.com/admin/api/' + apiVersion + '/graphql.json';
   const allRows = [];
   let cursor = null;
   let hasNext = true;
@@ -96,7 +109,11 @@ function syncShopifyProducts() {
     const code = response.getResponseCode();
     let body;
     try { body = JSON.parse(response.getContentText() || '{}'); } catch (e) { body = {}; }
-    if (code < 200 || code >= 300) throw new Error('Shopify respondió ' + code + '. Revisa el dominio y el token de Admin API.');
+
+    if (code < 200 || code >= 300) {
+      const detail = body && body.errors ? JSON.stringify(body.errors) : response.getContentText();
+      throw new Error('Shopify respondió ' + code + '. ' + String(detail || '').slice(0, 300));
+    }
     if (body.errors && body.errors.length) throw new Error('Shopify: ' + body.errors.map(e => e.message).join(' · '));
 
     const products = body && body.data && body.data.products;
@@ -135,20 +152,56 @@ function syncShopifyProducts() {
   return { ok: true, count: allRows.length, syncedAt, products: getActiveProducts_() };
 }
 
+function getShopifyAccessToken_(shop, clientId, clientSecret) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'SHOPIFY_CC_TOKEN_' + shop;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const tokenUrl = 'https://' + shop + '.myshopify.com/admin/oauth/access_token';
+  const response = UrlFetchApp.fetch(tokenUrl, {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    payload: {
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret
+    },
+    muteHttpExceptions: true
+  });
+
+  const code = response.getResponseCode();
+  let body;
+  try { body = JSON.parse(response.getContentText() || '{}'); } catch (e) { body = {}; }
+
+  if (code < 200 || code >= 300 || !body.access_token) {
+    const msg = body.error_description || body.error || response.getContentText() || 'No se pudo obtener el token.';
+    throw new Error('No se pudo autenticar con Shopify (' + code + '): ' + String(msg).slice(0, 300));
+  }
+
+  const expiresIn = Math.max(60, Number(body.expires_in || 86399));
+  // Apps Script Cache permite hasta 21600 segundos (6 h). Renovamos automáticamente al expirar el cache.
+  cache.put(cacheKey, String(body.access_token), Math.min(21600, Math.max(60, expiresIn - 300)));
+  return String(body.access_token);
+}
+
 function getShopifySyncInfo_() {
   const props = PropertiesService.getScriptProperties();
   return {
-    configured: !!(props.getProperty('SHOPIFY_SHOP_DOMAIN') && props.getProperty('SHOPIFY_ADMIN_TOKEN')),
+    configured: !!(props.getProperty('SHOPIFY_SHOP') && props.getProperty('SHOPIFY_CLIENT_ID') && props.getProperty('SHOPIFY_CLIENT_SECRET')),
     lastSync: props.getProperty('SHOPIFY_LAST_SYNC') || '',
     lastCount: Number(props.getProperty('SHOPIFY_LAST_SYNC_COUNT') || 0)
   };
 }
 
-function normalizeShopDomain_(value) {
-  return String(value || '')
-    .trim()
-    .replace(/^https?:\/\//i, '')
-    .replace(/\/+$/g, '');
+function normalizeShopSubdomain_(value) {
+  let s = String(value || '').trim().toLowerCase();
+  s = s.replace(/^https?:\/\//i, '').replace(/\/+$/g, '');
+  s = s.replace(/\.myshopify\.com$/i, '');
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(s)) {
+    throw new Error('SHOPIFY_SHOP debe ser el subdominio myshopify, por ejemplo: i-e-gift');
+  }
+  return s;
 }
 
 function getProductSheet_() {
