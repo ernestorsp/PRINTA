@@ -1,6 +1,7 @@
 const CONFIG = {
   SPREADSHEET_ID: '1eOWiWZh0zTnVLnv53bTDXvlFJJG5ZbvR6Upr7_9uLb8',
   SHEET_NAME: 'ORDENES',
+  PRODUCT_SHEET_NAME: 'PRODUCTOS',
   IMAGE_FOLDER_NAME: 'PRINTA_ORDENES_IMAGES',
   TIME_ZONE: 'America/New_York',
   ORIGIN_DAYS: { TikTok: 2, Shopify: 3, Zelle: 3 },
@@ -17,7 +18,8 @@ function doGet() {
 function getAppData() {
   const sh = getSheet_();
   const lastRow = sh.getLastRow();
-  if (lastRow < 2) return { orders: [], today: today_(), originDays: CONFIG.ORIGIN_DAYS };
+  const products = getActiveProducts_();
+  if (lastRow < 2) return { orders: [], products, today: today_(), originDays: CONFIG.ORIGIN_DAYS };
 
   const values = sh.getRange(2, 1, lastRow - 1, CONFIG.HEADERS.length).getValues();
   const orders = values
@@ -29,7 +31,25 @@ function getAppData() {
       return da.localeCompare(db) || (b.createdAt || '').localeCompare(a.createdAt || '');
     });
 
-  return { orders, today: today_(), originDays: CONFIG.ORIGIN_DAYS };
+  return { orders, products, today: today_(), originDays: CONFIG.ORIGIN_DAYS };
+}
+
+function getActiveProducts_() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const sh = ss.getSheetByName(CONFIG.PRODUCT_SHEET_NAME);
+  if (!sh || sh.getLastRow() < 2) return [];
+  const rows = sh.getRange(2, 1, sh.getLastRow() - 1, 7).getValues();
+  return rows
+    .filter(r => String(r[6] || '').toUpperCase() === 'ACTIVE' && String(r[2] || '').trim())
+    .map(r => ({
+      product: String(r[0] || ''),
+      variant: String(r[1] || ''),
+      label: String(r[2] || ''),
+      productGid: String(r[3] || ''),
+      variantGid: String(r[4] || ''),
+      sku: String(r[5] || '')
+    }))
+    .sort((a,b) => a.label.localeCompare(b.label, 'es', {sensitivity:'base'}));
 }
 
 function saveOrder(payload) {
